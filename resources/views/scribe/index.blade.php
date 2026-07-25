@@ -458,7 +458,7 @@ vary: Origin
  </code></pre></details>         <pre>
 
 <code class="language-json" style="max-height: 300px;">{
-    &quot;message&quot;: &quot;CDP Connect API is working!&quot;
+    &quot;message&quot;: &quot;Minal Ledger API is working!&quot;
 }</code>
  </pre>
     </span>

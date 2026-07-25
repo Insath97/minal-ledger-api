@@ -1,4 +1,4 @@
-# CDP Connect API
+# Minal Ledger API
 
 Point-of-Sale & Ledger Management System — RESTful API built with Laravel 12.
 
@@ -68,8 +68,8 @@ Every create, update, delete, and toggle-status action is logged with:
 
 ```bash
 # Clone the repository
-git clone <repo-url> cdpos-api
-cd cdpos-api
+git clone <repo-url> minal-ledger-api
+cd minal-ledger-api
 
 # Install PHP dependencies
 composer install
@@ -87,7 +87,7 @@ php artisan jwt:secret
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_DATABASE=pos_api
+DB_DATABASE=minal_ledger_api
 DB_USERNAME=root
 DB_PASSWORD=
 
@@ -109,12 +109,12 @@ After seeding:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `APP_NAME` | Application name | CDP Connect |
+| `APP_NAME` | Application name | Minal Ledger API |
 | `APP_ENV` | Environment | local |
 | `APP_DEBUG` | Debug mode | true |
 | `APP_URL` | App URL | http://localhost |
 | `FRONTEND_URL` | Frontend URL | http://localhost:5173 |
-| `DB_DATABASE` | Database name | pos_api |
+| `DB_DATABASE` | Database name | minal_ledger_api |
 | `JWT_SECRET` | JWT signing key | (generated) |
 | `JWT_TTL` | JWT token TTL (minutes) | 60 |
 | `JWT_REFRESH_TTL` | Refresh TTL (minutes) | 20160 (14 days) |
