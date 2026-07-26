@@ -160,6 +160,7 @@ class AuthController extends Controller
                 'phone' => 'nullable|string|max:20',
                 'email' => 'nullable|email|max:255|unique:users,email,' . $user->id,
                 'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+                'current_password' => 'required_with:password|string',
                 'password' => 'nullable|string|min:6',
             ]);
 
@@ -181,6 +182,12 @@ class AuthController extends Controller
             }
 
             if ($request->filled('password')) {
+                if (!Hash::check($request->current_password, $user->password)) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Current password is incorrect',
+                    ], 422);
+                }
                 $data['password'] = Hash::make($request->password);
             }
 

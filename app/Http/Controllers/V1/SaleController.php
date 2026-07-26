@@ -227,10 +227,11 @@ class SaleController extends Controller implements HasMiddleware
     }
 
     /**
-     * Update specified sale metadata (invoice_number, bill_image, notes, sale_date).
+     * Update specified sale.
      */
     public function update(UpdateSaleRequest $request, string $id)
     {
+        DB::beginTransaction();
         try {
             $sale = Sale::find($id);
 
@@ -253,13 +254,74 @@ class SaleController extends Controller implements HasMiddleware
                 unset($data['bill_image']);
             }
 
+            // Recalculate amounts if total_amount or paid_amount changed
+            $totalAmount = (float) ($data['total_amount'] ?? $sale->total_amount);
+            $paidAmount = (float) ($data['paid_amount'] ?? $sale->paid_amount);
+            $dueAmount = max(0, $totalAmount - $paidAmount);
+
+            if ($paidAmount >= $totalAmount) {
+                $paymentStatus = 'paid';
+                $dueAmount = 0.00;
+                $paidAmount = $totalAmount;
+            } elseif ($paidAmount > 0) {
+                $paymentStatus = 'partial';
+            } else {
+                $paymentStatus = 'unpaid';
+                $paidAmount = 0.00;
+            }
+
+            // Adjust customer balance if amounts changed
+            $oldDue = (float) $sale->due_amount;
+            $newDue = $dueAmount;
+            $balanceDiff = $newDue - $oldDue;
+
+            if (!empty($sale->customer_id) && $balanceDiff != 0) {
+                $customer = Customer::find($sale->customer_id);
+                if ($customer) {
+                    if ($balanceDiff > 0) {
+                        $customer->increment('outstanding_balance', $balanceDiff);
+                    } else {
+                        $customer->decrement('outstanding_balance', abs($balanceDiff));
+                    }
+                }
+            }
+
+            // Handle new customer if changed
+            $newCustomerId = $data['customer_id'] ?? $sale->customer_id;
+            if ($newCustomerId != $sale->customer_id) {
+                // Reverse balance from old customer
+                if (!empty($sale->customer_id) && $oldDue > 0) {
+                    $oldCustomer = Customer::find($sale->customer_id);
+                    if ($oldCustomer) {
+                        $oldCustomer->decrement('outstanding_balance', min($oldCustomer->outstanding_balance, $oldDue));
+                    }
+                }
+                // Apply balance to new customer
+                if (!empty($newCustomerId) && $newDue > 0) {
+                    $newCustomer = Customer::find($newCustomerId);
+                    if ($newCustomer) {
+                        $newCustomer->increment('outstanding_balance', $newDue);
+                    }
+                }
+                $data['customer_id'] = $newCustomerId;
+            }
+
+            $data['total_amount'] = $totalAmount;
+            $data['paid_amount'] = $paidAmount;
+            $data['due_amount'] = $dueAmount;
+            $data['payment_status'] = $paymentStatus;
             $data['updated_by'] = auth()->id() ?? 1;
+
+            // Remove non-table inputs
+            unset($data['payment_method'], $data['cheque_number'], $data['bank_name'], $data['cheque_date'], $data['cheque_amount']);
 
             $sale->update($data);
 
-            $this->logActivity('UPDATE', 'Sale', "Updated metadata for sale ref: {$sale->reference_number}", $request->validated());
+            $this->logActivity('UPDATE', 'Sale', "Updated sale: {$sale->reference_number}", $request->validated());
 
             $sale->load(['customer:id,code,name,phone', 'creator:id,name']);
+
+            DB::commit();
 
             return response()->json([
                 'status' => 'success',
@@ -267,6 +329,7 @@ class SaleController extends Controller implements HasMiddleware
                 'data' => $sale,
             ], 200);
         } catch (\Throwable $th) {
+            DB::rollBack();
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to update sale',

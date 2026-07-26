@@ -36,6 +36,7 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
     Route::prefix('users')->group(function () {
         Route::get('list', [UserController::class, 'getActiveList']);
         Route::patch('{id}/toggle-status', [UserController::class, 'toggleStatus']);
+        Route::patch('{id}/toggle-can-login', [UserController::class, 'toggleCanLogin']);
     });
     Route::apiResource('users', UserController::class);
 
@@ -87,6 +88,8 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
     // Activity Logs (Read-only: Get All and Get By ID)
     Route::prefix('activity-logs')->group(function () {
         Route::get('/', [ActivityLogController::class, 'index']);
+        Route::get('modules', [ActivityLogController::class, 'getModules']);
+        Route::get('actions', [ActivityLogController::class, 'getActions']);
         Route::get('{id}', [ActivityLogController::class, 'show']);
     });
 });

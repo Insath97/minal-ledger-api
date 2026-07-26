@@ -72,6 +72,46 @@ class ActivityLogController extends Controller implements HasMiddleware
     }
 
     /**
+     * Get distinct modules.
+     */
+    public function getModules()
+    {
+        try {
+            $modules = ActivityLog::distinct()->pluck('module')->filter()->values();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $modules,
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve modules',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get distinct actions.
+     */
+    public function getActions()
+    {
+        try {
+            $actions = ActivityLog::distinct()->pluck('action')->filter()->values();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $actions,
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve actions',
+            ], 500);
+        }
+    }
+
+    /**
      * Display the specified activity log (Get By ID).
      */
     public function show(string $id)

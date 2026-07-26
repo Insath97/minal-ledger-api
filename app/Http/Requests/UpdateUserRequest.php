@@ -24,6 +24,7 @@ class UpdateUserRequest extends FormRequest
             'phone' => 'nullable|string|max:20',
             'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'password' => 'nullable|string|min:6',
+            'confirm_password' => 'nullable|string|same:password',
             'is_active' => 'sometimes|boolean',
             'can_login' => 'sometimes|boolean',
             'roles' => 'sometimes|array',

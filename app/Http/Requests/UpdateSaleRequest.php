@@ -22,10 +22,20 @@ class UpdateSaleRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'business_type' => 'sometimes|required|in:retail,wholesale',
+            'customer_id' => 'nullable|exists:customers,id',
             'invoice_number' => 'nullable|string|max:100',
-            'bill_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+            'total_amount' => 'sometimes|required|numeric|min:0.01',
+            'paid_amount' => 'sometimes|numeric|min:0',
             'sale_date' => 'sometimes|required|date',
+            'bill_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'notes' => 'nullable|string',
+            'payment_method' => 'nullable|in:cash,credit_card,bank_transfer,cheque',
+            'cheque_number' => 'required_if:payment_method,cheque|nullable|string|max:50',
+            'bank_name' => 'required_if:payment_method,cheque|nullable|string|max:100',
+            'cheque_date' => 'required_if:payment_method,cheque|nullable|date',
+            'cheque_amount' => 'required_if:payment_method,cheque|nullable|numeric|min:0.01',
+            'cheque_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ];
     }
 

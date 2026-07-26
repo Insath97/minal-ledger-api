@@ -31,7 +31,7 @@ class UserController extends Controller implements HasMiddleware
             new Middleware('permission:User Create', ['only' => ['store']]),
             new Middleware('permission:User Update', ['only' => ['update']]),
             new Middleware('permission:User Delete', ['only' => ['destroy']]),
-            new Middleware('permission:User Toggle Status', ['only' => ['toggleStatus']]),
+            new Middleware('permission:User Toggle Status', ['only' => ['toggleStatus', 'toggleCanLogin']]),
         ];
     }
 
@@ -349,6 +349,52 @@ class UserController extends Controller implements HasMiddleware
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to toggle user status',
+                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Toggle the can_login status of a user.
+     */
+    public function toggleCanLogin(string $id)
+    {
+        try {
+            $authUser = auth()->user();
+
+            if ($authUser->id == $id) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'You cannot toggle your own login access',
+                ], 422);
+            }
+
+            $user = User::find($id);
+
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found',
+                ], 404);
+            }
+
+            $user->can_login = !$user->can_login;
+            $user->save();
+
+            $this->logActivity('TOGGLE_CAN_LOGIN', 'User', "Toggled login access for user: {$user->username} (" . ($user->can_login ? 'Can Login' : 'No Login') . ")");
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'User login access updated successfully',
+                'data' => [
+                    'id' => $user->id,
+                    'can_login' => $user->can_login,
+                ],
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to toggle user login access',
                 'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }
