@@ -10,7 +10,6 @@ use App\Http\Controllers\V1\SaleController;
 use App\Http\Controllers\V1\ChequeController;
 use App\Http\Controllers\V1\PaymentController;
 use App\Http\Controllers\V1\ExpenseController;
-use App\Http\Controllers\V1\FinanceController;
 use App\Http\Controllers\V1\DashboardController;
 use App\Http\Controllers\V1\ActivityLogController;
 use App\Http\Controllers\V1\ReportController;
@@ -83,23 +82,16 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
     Route::get('dashboard/analytics', [DashboardController::class, 'getAnalytics']);
     Route::get('dashboard/activity', [DashboardController::class, 'getActivity']);
 
-    // Finance & Reports
-    Route::prefix('finance')->group(function () {
-        Route::get('dashboard', [FinanceController::class, 'getDashboard']);
-        Route::get('pnl', [FinanceController::class, 'getPnL']);
-        Route::get('income-breakdown', [FinanceController::class, 'getIncomeBreakdown']);
-        Route::get('expense-breakdown', [FinanceController::class, 'getExpenseBreakdown']);
-        Route::get('dues-aging', [FinanceController::class, 'getDuesAging']);
-    });
-
     // Reports
     Route::prefix('reports')->group(function () {
+        Route::get('pnl', [ReportController::class, 'pnl']);
         Route::get('sales', [ReportController::class, 'salesReport']);
         Route::get('customer-statement', [ReportController::class, 'customerStatement']);
         Route::get('cheques', [ReportController::class, 'chequeReport']);
         Route::get('payments', [ReportController::class, 'paymentReport']);
         Route::get('expense-summary', [ReportController::class, 'expenseSummary']);
         Route::get('monthly-summary', [ReportController::class, 'monthlySummary']);
+        Route::get('dues-aging', [ReportController::class, 'duesAging']);
     });
 
     // Activity Logs (Read-only: Get All and Get By ID)

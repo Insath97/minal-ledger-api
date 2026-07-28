@@ -21,7 +21,7 @@ class ReportController extends Controller implements HasMiddleware
         return [
             new Middleware('permission:Reports', ['only' => [
                 'salesReport', 'customerStatement', 'chequeReport',
-                'paymentReport', 'expenseSummary', 'monthlySummary',
+                'paymentReport', 'expenseSummary', 'monthlySummary', 'duesAging', 'pnl',
             ]]),
         ];
     }
@@ -175,6 +175,7 @@ class ReportController extends Controller implements HasMiddleware
             $dateTo = $request->get('date_to');
             $status = $request->get('status');
             $bankName = $request->get('bank_name');
+            $search = $request->get('search');
 
             $query = Cheque::with('customer:id,code,name');
 
@@ -182,6 +183,7 @@ class ReportController extends Controller implements HasMiddleware
             if ($dateTo) $query->where('cheque_date', '<=', $dateTo);
             if ($status) $query->where('status', $status);
             if ($bankName) $query->where('bank_name', $bankName);
+            if ($search) $query->where('cheque_number', 'like', "%{$search}%");
 
             $cheques = $query->orderBy('cheque_date', 'desc')->get();
 
@@ -390,6 +392,125 @@ class ReportController extends Controller implements HasMiddleware
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to retrieve monthly summary',
+                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Customer Dues Aging Analysis (0-30, 31-60, 61-90, 90+ Days).
+     */
+    public function duesAging(Request $request): JsonResponse
+    {
+        try {
+            $unpaidSales = Sale::with('customer:id,code,name,phone')
+                ->whereIn('payment_status', ['unpaid', 'partial'])
+                ->where('due_amount', '>', 0)
+                ->get();
+
+            $aging = [
+                'current_0_30' => 0.00,
+                'aging_31_60' => 0.00,
+                'aging_61_90' => 0.00,
+                'over_90' => 0.00,
+                'total_due' => 0.00,
+            ];
+
+            $detailedSales = [];
+
+            foreach ($unpaidSales as $sale) {
+                $days = now()->diffInDays($sale->sale_date);
+                $due = (float) $sale->due_amount;
+
+                $aging['total_due'] += $due;
+
+                if ($days <= 30) {
+                    $bucket = '0-30 days';
+                    $aging['current_0_30'] += $due;
+                } elseif ($days <= 60) {
+                    $bucket = '31-60 days';
+                    $aging['aging_31_60'] += $due;
+                } elseif ($days <= 90) {
+                    $bucket = '61-90 days';
+                    $aging['aging_61_90'] += $due;
+                } else {
+                    $bucket = '90+ days';
+                    $aging['over_90'] += $due;
+                }
+
+                $detailedSales[] = [
+                    'sale_id' => $sale->id,
+                    'reference_number' => $sale->reference_number,
+                    'customer' => $sale->customer,
+                    'sale_date' => $sale->sale_date->toDateString(),
+                    'days_outstanding' => $days,
+                    'due_amount' => $due,
+                    'aging_bucket' => $bucket,
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Customer dues aging analysis retrieved successfully',
+                'data' => [
+                    'summary' => $aging,
+                    'sales' => $detailedSales,
+                ],
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve dues aging analysis',
+                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get Monthly Profit and Loss Breakdown.
+     */
+    public function pnl(Request $request): JsonResponse
+    {
+        try {
+            $year = $request->get('year', date('Y'));
+
+            $records = \App\Models\FinanceRecord::select(
+                DB::raw('MONTH(record_date) as month'),
+                DB::raw("SUM(CASE WHEN record_type = 'income' THEN amount ELSE 0 END) as income"),
+                DB::raw("SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense")
+            )
+            ->whereYear('record_date', $year)
+            ->groupBy(DB::raw('MONTH(record_date)'))
+            ->orderBy('month', 'asc')
+            ->get();
+
+            $monthlyBreakdown = [];
+            for ($m = 1; $m <= 12; $m++) {
+                $monthRecord = $records->firstWhere('month', $m);
+                $inc = $monthRecord ? (float) $monthRecord->income : 0.00;
+                $exp = $monthRecord ? (float) $monthRecord->expense : 0.00;
+
+                $monthlyBreakdown[] = [
+                    'month_number' => $m,
+                    'month_name' => date('F', mktime(0, 0, 0, $m, 1)),
+                    'income' => $inc,
+                    'expense' => $exp,
+                    'net_profit' => $inc - $exp,
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Monthly Profit & Loss breakdown retrieved successfully',
+                'data' => [
+                    'year' => (int) $year,
+                    'monthly' => $monthlyBreakdown,
+                ],
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve P&L breakdown',
                 'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }
