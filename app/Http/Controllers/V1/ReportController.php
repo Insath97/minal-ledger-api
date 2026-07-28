@@ -419,7 +419,7 @@ class ReportController extends Controller implements HasMiddleware
             $detailedSales = [];
 
             foreach ($unpaidSales as $sale) {
-                $days = now()->diffInDays($sale->sale_date);
+                $days = (int) now()->diffInDays($sale->sale_date);
                 $due = (float) $sale->due_amount;
 
                 $aging['total_due'] += $due;
