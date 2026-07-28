@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class ReportController extends Controller implements HasMiddleware
@@ -419,7 +420,9 @@ class ReportController extends Controller implements HasMiddleware
             $detailedSales = [];
 
             foreach ($unpaidSales as $sale) {
-                $days = (int) now()->diffInDays($sale->sale_date);
+                $saleDate = Carbon::parse($sale->sale_date)->startOfDay();
+                $today = now()->startOfDay();
+                $days = $saleDate->greaterThan($today) ? 0 : (int) $saleDate->diffInDays($today);
                 $due = (float) $sale->due_amount;
 
                 $aging['total_due'] += $due;
