@@ -85,6 +85,12 @@ class PermissionsSeeder extends Seeder
             /* Finance Dashboard & Reports */
             ['name' => 'Finance Dashboard', 'group_name' => 'Finance Management Permissions'],
 
+            /* Dashboard */
+            ['name' => 'Dashboard', 'group_name' => 'Dashboard Permissions'],
+
+            /* Reports */
+            ['name' => 'Reports', 'group_name' => 'Reports Permissions'],
+
             /* Activity Log Management */
             ['name' => 'ActivityLog Index', 'group_name' => 'Activity Log Management Permissions'],
             ['name' => 'ActivityLog Show', 'group_name' => 'Activity Log Management Permissions'],
