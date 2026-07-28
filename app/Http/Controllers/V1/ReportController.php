@@ -84,16 +84,6 @@ class ReportController extends Controller implements HasMiddleware
             $customerId = $request->get('customer_id');
             $dateFrom = $request->get('date_from');
             $dateTo = $request->get('date_to');
-            $month = $request->get('month');
-            $year = $request->get('year');
-
-            if ($month && $year) {
-                $dateFrom = sprintf('%04d-%02d-01', $year, $month);
-                $dateTo = date('Y-m-t', strtotime($dateFrom));
-            } elseif ($year && !$month) {
-                $dateFrom = "{$year}-01-01";
-                $dateTo = "{$year}-12-31";
-            }
 
             if (!$customerId) {
                 return response()->json([
