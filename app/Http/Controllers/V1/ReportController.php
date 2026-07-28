@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Expense;
 use App\Models\Payment;
 use App\Models\Sale;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -28,7 +29,7 @@ class ReportController extends Controller implements HasMiddleware
     /**
      * Sales Report — filterable by date range, customer, business_type, payment_status
      */
-    public function salesReport(Request $request)
+    public function salesReport(Request $request): JsonResponse
     {
         try {
             $dateFrom = $request->get('date_from', now()->startOfYear()->toDateString());
@@ -77,12 +78,22 @@ class ReportController extends Controller implements HasMiddleware
     /**
      * Customer Statement — full transaction history for a customer
      */
-    public function customerStatement(Request $request)
+    public function customerStatement(Request $request): JsonResponse
     {
         try {
             $customerId = $request->get('customer_id');
             $dateFrom = $request->get('date_from');
             $dateTo = $request->get('date_to');
+            $month = $request->get('month');
+            $year = $request->get('year');
+
+            if ($month && $year) {
+                $dateFrom = sprintf('%04d-%02d-01', $year, $month);
+                $dateTo = date('Y-m-t', strtotime($dateFrom));
+            } elseif ($year && !$month) {
+                $dateFrom = "{$year}-01-01";
+                $dateTo = "{$year}-12-31";
+            }
 
             if (!$customerId) {
                 return response()->json([
@@ -98,7 +109,7 @@ class ReportController extends Controller implements HasMiddleware
                 ->orderBy('sale_date', 'desc');
             if ($dateFrom) $salesQuery->where('sale_date', '>=', $dateFrom);
             if ($dateTo) $salesQuery->where('sale_date', '<=', $dateTo);
-            $sales = $salesQuery->get()->map(fn ($s) => [
+            $sales = $salesQuery->get()->map(fn (Sale $s) => [
                 'type' => 'sale',
                 'date' => $s->sale_date,
                 'reference' => $s->reference_number,
@@ -113,7 +124,7 @@ class ReportController extends Controller implements HasMiddleware
                 ->orderBy('payment_date', 'desc');
             if ($dateFrom) $paymentQuery->where('payment_date', '>=', $dateFrom);
             if ($dateTo) $paymentQuery->where('payment_date', '<=', $dateTo);
-            $payments = $paymentQuery->get()->map(fn ($p) => [
+            $payments = $paymentQuery->get()->map(fn (Payment $p) => [
                 'type' => 'payment',
                 'date' => $p->payment_date,
                 'reference' => "PAY-{$p->id}",
@@ -167,7 +178,7 @@ class ReportController extends Controller implements HasMiddleware
     /**
      * Cheque Report — by status, date range, bank
      */
-    public function chequeReport(Request $request)
+    public function chequeReport(Request $request): JsonResponse
     {
         try {
             $dateFrom = $request->get('date_from');
@@ -222,7 +233,7 @@ class ReportController extends Controller implements HasMiddleware
     /**
      * Payment Report — by date range, method, customer
      */
-    public function paymentReport(Request $request)
+    public function paymentReport(Request $request): JsonResponse
     {
         try {
             $dateFrom = $request->get('date_from', now()->startOfMonth()->toDateString());
@@ -278,7 +289,7 @@ class ReportController extends Controller implements HasMiddleware
     /**
      * Expense Summary — monthly trend + category breakdown
      */
-    public function expenseSummary(Request $request)
+    public function expenseSummary(Request $request): JsonResponse
     {
         try {
             $year = $request->get('year', date('Y'));
@@ -338,7 +349,7 @@ class ReportController extends Controller implements HasMiddleware
     /**
      * Monthly Summary — year overview with income vs expense vs profit
      */
-    public function monthlySummary(Request $request)
+    public function monthlySummary(Request $request): JsonResponse
     {
         try {
             $year = $request->get('year', date('Y'));
