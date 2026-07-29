@@ -80,16 +80,19 @@ class PermissionsSeeder extends Seeder
             ['name' => 'Expense Create', 'group_name' => 'Expense Management Permissions'],
             ['name' => 'Expense Update', 'group_name' => 'Expense Management Permissions'],
             ['name' => 'Expense Delete', 'group_name' => 'Expense Management Permissions'],
-            ['name' => 'Expense Summary', 'group_name' => 'Expense Management Permissions'],
-
-            /* Finance Dashboard & Reports */
-            ['name' => 'Finance Dashboard', 'group_name' => 'Finance Management Permissions'],
 
             /* Dashboard */
-            ['name' => 'Dashboard', 'group_name' => 'Dashboard Permissions'],
+            ['name' => 'Dashboard Index', 'group_name' => 'Dashboard Permissions'],
 
             /* Reports */
-            ['name' => 'Reports', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Sales', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Customer Statement', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Cheques', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Payments', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Expense Summary', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Monthly Summary', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report Dues Aging', 'group_name' => 'Reports Permissions'],
+            ['name' => 'Report PnL', 'group_name' => 'Reports Permissions'],
 
             /* Activity Log Management */
             ['name' => 'ActivityLog Index', 'group_name' => 'Activity Log Management Permissions'],
@@ -106,9 +109,6 @@ class PermissionsSeeder extends Seeder
 
         $roles = [
             'Super Admin',
-            'System Admin',
-            'Manager',
-            'Cashier',
         ];
 
         foreach ($roles as $roleName) {

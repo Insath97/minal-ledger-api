@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CreateSaleRequest;
 use App\Http\Requests\UpdateSaleRequest;
 use App\Models\Customer;
+use App\Models\FinanceRecord;
 use App\Models\Sale;
 use App\Models\Cheque;
 use App\Traits\ActivityLogTrait;
@@ -39,6 +40,7 @@ class SaleController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Sale', 'Viewed sales list');
             $perPage = $request->get('per_page', 15);
             $query = Sale::with(['customer:id,code,name,phone', 'creator:id,name']);
 
@@ -170,6 +172,18 @@ class SaleController extends Controller implements HasMiddleware
                 ]);
             }
 
+            // If sale has an upfront paid amount, record it in FinanceRecord
+            if ($paidAmount > 0) {
+                FinanceRecord::create([
+                    'record_type'    => 'income',
+                    'reference_type' => 'Sale',
+                    'reference_id'   => $sale->id,
+                    'amount'         => $paidAmount,
+                    'description'    => "Upfront payment for sale {$sale->reference_number}",
+                    'record_date'    => $sale->sale_date,
+                ]);
+            }
+
             DB::commit();
 
             // Log activity
@@ -212,6 +226,8 @@ class SaleController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            $this->logActivity('SHOW', 'Sale', "Viewed sale: {$sale->reference_number}");
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Sale retrieved successfully',
@@ -247,7 +263,7 @@ class SaleController extends Controller implements HasMiddleware
             // Handle bill image update & deletion
             if ($request->hasFile('bill_image')) {
                 $data['bill_image'] = $this->handleFileUpload($request, 'bill_image', $sale->bill_image, 'sales');
-            } elseif ($request->exists('bill_image') && empty($request->bill_image)) {
+            } elseif ($request->exists('bill_image') && (empty($request->bill_image) || $request->bill_image === 'null')) {
                 $this->deleteFile($sale->bill_image);
                 $data['bill_image'] = null;
             } else {
@@ -316,6 +332,32 @@ class SaleController extends Controller implements HasMiddleware
             unset($data['payment_method'], $data['cheque_number'], $data['bank_name'], $data['cheque_date'], $data['cheque_amount']);
 
             $sale->update($data);
+
+            // Sync FinanceRecord for upfront paid amount
+            $existingRecord = FinanceRecord::where('reference_type', 'Sale')->where('reference_id', $sale->id)->first();
+            if ($paidAmount > 0) {
+                if ($existingRecord) {
+                    $existingRecord->update([
+                        'amount'      => $paidAmount,
+                        'description' => "Upfront payment for sale {$sale->reference_number}",
+                        'record_date' => $sale->sale_date,
+                    ]);
+                } else {
+                    FinanceRecord::create([
+                        'record_type'    => 'income',
+                        'reference_type' => 'Sale',
+                        'reference_id'   => $sale->id,
+                        'amount'         => $paidAmount,
+                        'description'    => "Upfront payment for sale {$sale->reference_number}",
+                        'record_date'    => $sale->sale_date,
+                    ]);
+                }
+            } else {
+                // paid_amount dropped to 0 — remove any existing record
+                if ($existingRecord) {
+                    $existingRecord->delete();
+                }
+            }
 
             $this->logActivity('UPDATE', 'Sale', "Updated sale: {$sale->reference_number}", $request->validated());
 

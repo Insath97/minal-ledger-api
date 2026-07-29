@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Http\Requests\UpdateProfileRequest;
 
 class AuthController extends Controller
 {
@@ -44,6 +45,7 @@ class AuthController extends Controller
                 ->first();
 
             if (!$user || !Hash::check($passwordVal, $user->password)) {
+                $this->logActivity('LOGIN_FAILED', 'Auth', "Failed login attempt for login: {$loginVal}", ['login' => $loginVal], 'warning');
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Invalid credentials'
@@ -56,6 +58,7 @@ class AuthController extends Controller
             $user = auth('api')->user();
 
             if (!$user->canLogin()) {
+                $this->logActivity('LOGIN_FAILED', 'Auth', "Deactivated user attempted login: {$user->username}", ['user_id' => $user->id], 'warning');
                 Auth::guard('api')->logout();
                 return response()->json([
                     'status' => 'error',
@@ -64,6 +67,7 @@ class AuthController extends Controller
             }
 
             if (!$user->roles()->exists()) {
+                $this->logActivity('LOGIN_FAILED', 'Auth', "User without role attempted login: {$user->username}", ['user_id' => $user->id], 'warning');
                 Auth::guard('api')->logout();
                 return response()->json([
                     'success' => false,
@@ -72,6 +76,12 @@ class AuthController extends Controller
             }
 
             $user->updateLastLogin($request->ip());
+
+            $this->logActivity('LOGIN_SUCCESS', 'Auth', "User logged in successfully: {$user->username} (IP: {$request->ip()})", [
+                'user_id' => $user->id,
+                'username' => $user->username,
+                'ip' => $request->ip(),
+            ]);
 
             $cookie = cookie(
                 'auth_token',
@@ -128,6 +138,11 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         try {
+            $user = auth('api')->user();
+            if ($user) {
+                $this->logActivity('LOGOUT', 'Auth', "User logged out: {$user->username}", ['user_id' => $user->id]);
+            }
+
             // Logout the user (invalidates the token)
             Auth::guard('api')->logout();
 
@@ -143,69 +158,6 @@ class AuthController extends Controller
                 'status' => 'error',
                 'message' => 'Failed to logout',
                 'error' => $th->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Get authenticated admin user
-     */
-    public function updateProfile(Request $request)
-    {
-        try {
-            $user = auth('api')->user();
-
-            $validator = Validator::make($request->all(), [
-                'name' => 'sometimes|required|string|max:255',
-                'phone' => 'nullable|string|max:20',
-                'email' => 'nullable|email|max:255|unique:users,email,' . $user->id,
-                'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-                'current_password' => 'required_with:password|string',
-                'password' => 'nullable|string|min:6',
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            $data = $request->only(['name', 'phone', 'email']);
-
-            if ($request->hasFile('profile_image')) {
-                $data['profile_image'] = $this->handleFileUpload($request, 'profile_image', $user->profile_image, 'users');
-            } elseif ($request->exists('profile_image') && empty($request->profile_image)) {
-                $this->deleteFile($user->profile_image);
-                $data['profile_image'] = null;
-            }
-
-            if ($request->filled('password')) {
-                if (!Hash::check($request->current_password, $user->password)) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Current password is incorrect',
-                    ], 422);
-                }
-                $data['password'] = Hash::make($request->password);
-            }
-
-            $user->update($data);
-            $user->load(['roles']);
-
-            $this->logActivity('UPDATE', 'User', "Profile updated: {$user->name} ({$user->username})");
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Profile updated successfully',
-                'data' => $user
-            ], 200);
-        } catch (\Throwable $th) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to update profile',
-                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -245,6 +197,69 @@ class AuthController extends Controller
                 'status' => 'error',
                 'message' => 'Failed to fetch user details',
                 'error' => $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update authenticated user profile
+     */
+    public function updateProfile(UpdateProfileRequest $request)
+    {
+        try {
+            /** @var User $user */
+            $user = auth('api')->user();
+
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found',
+                ], 404);
+            }
+
+            $data = $request->validated();
+
+            // Handle Profile Image Upload & Delete Old Image
+            if ($request->hasFile('profile_image')) {
+                $data['profile_image'] = $this->handleFileUpload(
+                    $request,
+                    'profile_image',
+                    $user->profile_image,
+                    'users'
+                );
+            } elseif ($request->exists('profile_image') && (empty($request->profile_image) || $request->profile_image === 'null')) {
+                $this->deleteFile($user->profile_image);
+                $data['profile_image'] = null;
+            } else {
+                unset($data['profile_image']);
+            }
+
+            // Handle password update if provided
+            if (!empty($data['password'])) {
+                $data['password'] = Hash::make($data['password']);
+            } else {
+                unset($data['password']);
+            }
+            unset($data['current_password']);
+            unset($data['confirm_password']);
+
+            $user->update($data);
+
+            // Log activity
+            $this->logActivity('UPDATE_PROFILE', 'Auth', "User updated their own profile: {$user->username}", $data);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Profile updated successfully',
+                'data' => [
+                    'user' => $user
+                ]
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to update profile',
+                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }
     }

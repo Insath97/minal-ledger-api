@@ -6,28 +6,31 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
-class UpdateUserRequest extends FormRequest
+class UpdateProfileRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         return true;
     }
 
+    /**
+     * Get the validation rules that apply to the request.
+     */
     public function rules(): array
     {
-        $id = $this->route('user') ?? $this->route('id');
+        $id = auth('api')->id();
 
         $rules = [
             'name' => 'sometimes|required|string|max:255',
             'username' => 'sometimes|required|string|max:100|unique:users,username,' . $id,
             'email' => 'nullable|email|max:255|unique:users,email,' . $id,
             'phone' => 'nullable|string|max:20',
+            'current_password' => 'nullable|required_with:password|string',
             'password' => 'nullable|string|min:6',
-            'confirm_password' => 'nullable|string|same:password',
-            'is_active' => 'sometimes|boolean',
-            'can_login' => 'sometimes|boolean',
-            'roles' => 'sometimes|array',
-            'roles.*' => 'string',
+            'confirm_password' => 'nullable|required_with:password|string|same:password',
         ];
 
         if ($this->hasFile('profile_image')) {
@@ -39,6 +42,26 @@ class UpdateUserRequest extends FormRequest
         return $rules;
     }
 
+    /**
+     * Configure the validator instance.
+     */
+    public function withValidator($validator)
+    {
+        $validator->after(function ($validator) {
+            $user = auth('api')->user();
+            $currentPassword = $this->input('current_password');
+
+            if ($this->filled('password') && $user) {
+                if (!$currentPassword || !\Illuminate\Support\Facades\Hash::check($currentPassword, $user->password)) {
+                    $validator->errors()->add('current_password', 'The current password you entered is incorrect.');
+                }
+            }
+        });
+    }
+
+    /**
+     * Handle failed validation and return a JSON error response.
+     */
     protected function failedValidation(Validator $validator)
     {
         $errorMessages = $validator->errors();

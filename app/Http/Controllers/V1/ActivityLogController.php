@@ -4,12 +4,15 @@ namespace App\Http\Controllers\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Traits\ActivityLogTrait;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 
 class ActivityLogController extends Controller implements HasMiddleware
 {
+    use ActivityLogTrait;
+
     /**
      * Define the middleware for this controller.
      */
@@ -26,6 +29,7 @@ class ActivityLogController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('LOGS_VIEW', 'ActivityLog', 'Viewed activity logs index list');
             $perPage = $request->get('per_page', 15);
             $query = ActivityLog::with(['user:id,name,username,email']);
 

@@ -36,6 +36,7 @@ class BankController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Bank', 'Viewed bank list');
             $perPage = $request->get('per_page', 15);
             $query = Bank::query();
 
@@ -103,6 +104,8 @@ class BankController extends Controller implements HasMiddleware
                     'message' => 'Bank not found',
                 ], 404);
             }
+
+            $this->logActivity('SHOW', 'Bank', "Viewed bank: {$bank->name}");
 
             return response()->json([
                 'status' => 'success',

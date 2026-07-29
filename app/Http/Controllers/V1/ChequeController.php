@@ -7,6 +7,9 @@ use App\Http\Requests\CreateChequeRequest;
 use App\Http\Requests\UpdateChequeStatusRequest;
 use App\Models\Cheque;
 use App\Models\Customer;
+use App\Models\FinanceRecord;
+use App\Models\Payment;
+use App\Models\PaymentSale;
 use App\Models\Sale;
 use App\Traits\ActivityLogTrait;
 use App\Traits\FileUploadTrait;
@@ -39,6 +42,7 @@ class ChequeController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Cheque', 'Viewed cheque list');
             $perPage = $request->get('per_page', 15);
             $query = Cheque::with(['customer:id,code,name,phone', 'sale:id,reference_number,total_amount,due_amount', 'creator:id,name']);
 
@@ -140,6 +144,8 @@ class ChequeController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            $this->logActivity('SHOW', 'Cheque', "Viewed cheque #{$cheque->cheque_number}");
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Cheque retrieved successfully',
@@ -190,29 +196,125 @@ class ChequeController extends Controller implements HasMiddleware
                 $cheque->updated_by = auth()->id() ?? 1;
                 $cheque->save();
 
-                // 1. Decrement Customer Outstanding Balance
-                $customer = Customer::find($cheque->customer_id);
-                if ($customer) {
-                    $customer->decrement('outstanding_balance', min($customer->outstanding_balance, $cheque->amount));
-                }
+                $chequeAmount = (float) $cheque->amount;
 
-                // 2. Adjust attached sale if sale_id exists
+                // 1. Create a Payment record
+                $payment = Payment::create([
+                    'customer_id' => $cheque->customer_id,
+                    'cheque_id' => $cheque->id,
+                    'total_amount' => $chequeAmount,
+                    'payment_method' => 'cheque',
+                    'payment_date' => $clearanceDate,
+                    'notes' => "Cleared Cheque #{$cheque->cheque_number} - Bank: {$cheque->bank_name}",
+                    'created_by' => auth()->id() ?? 1,
+                ]);
+
+                $remainingPool = $chequeAmount;
+                $totalAllocated = 0.00;
+
+                // 2. Allocate to targeted sale if sale_id exists
                 if ($cheque->sale_id) {
                     $sale = Sale::find($cheque->sale_id);
-                    if ($sale && $sale->due_amount > 0) {
-                        $allocatedAmount = min($sale->due_amount, $cheque->amount);
-                        $newPaidAmount = $sale->paid_amount + $allocatedAmount;
-                        $newDueAmount = max(0, $sale->total_amount - $newPaidAmount);
+                    if ($sale && (float) $sale->due_amount > 0) {
+                        $dueForSale = (float) $sale->due_amount;
+                        if ($remainingPool >= $dueForSale) {
+                            $allocation = $dueForSale;
+                            $newPaid = (float) $sale->total_amount;
+                            $newDue = 0.00;
+                            $saleStatus = 'paid';
+                            $remainingPool -= $dueForSale;
+                        } else {
+                            $allocation = $remainingPool;
+                            $newPaid = (float) $sale->paid_amount + $remainingPool;
+                            $newDue = (float) $sale->total_amount - $newPaid;
+                            $saleStatus = 'partial';
+                            $remainingPool = 0.00;
+                        }
 
-                        $paymentStatus = $newDueAmount <= 0 ? 'paid' : 'partial';
+                        PaymentSale::create([
+                            'payment_id' => $payment->id,
+                            'sale_id' => $sale->id,
+                            'allocated_amount' => $allocation,
+                        ]);
 
                         $sale->update([
-                            'paid_amount' => $newPaidAmount,
-                            'due_amount' => $newDueAmount,
-                            'payment_status' => $paymentStatus,
+                            'paid_amount' => $newPaid,
+                            'due_amount' => $newDue,
+                            'payment_status' => $saleStatus,
                         ]);
+
+                        $totalAllocated += $allocation;
                     }
                 }
+
+                // 3. FIFO Allocation for remaining pool across customer's other open sales
+                if ($remainingPool > 0) {
+                    $openSalesQuery = Sale::where('customer_id', $cheque->customer_id)
+                        ->whereIn('payment_status', ['unpaid', 'partial'])
+                        ->where('due_amount', '>', 0);
+
+                    if ($cheque->sale_id) {
+                        $openSalesQuery->where('id', '!=', $cheque->sale_id);
+                    }
+
+                    $openSales = $openSalesQuery->orderBy('sale_date', 'asc')->orderBy('id', 'asc')->get();
+
+                    foreach ($openSales as $sale) {
+                        if ($remainingPool <= 0) {
+                            break;
+                        }
+
+                        $dueForSale = (float) $sale->due_amount;
+                        if ($dueForSale <= 0) {
+                            continue;
+                        }
+
+                        if ($remainingPool >= $dueForSale) {
+                            $allocation = $dueForSale;
+                            $newPaid = (float) $sale->total_amount;
+                            $newDue = 0.00;
+                            $saleStatus = 'paid';
+                            $remainingPool -= $dueForSale;
+                        } else {
+                            $allocation = $remainingPool;
+                            $newPaid = (float) $sale->paid_amount + $remainingPool;
+                            $newDue = (float) $sale->total_amount - $newPaid;
+                            $saleStatus = 'partial';
+                            $remainingPool = 0.00;
+                        }
+
+                        PaymentSale::create([
+                            'payment_id' => $payment->id,
+                            'sale_id' => $sale->id,
+                            'allocated_amount' => $allocation,
+                        ]);
+
+                        $sale->update([
+                            'paid_amount' => $newPaid,
+                            'due_amount' => $newDue,
+                            'payment_status' => $saleStatus,
+                        ]);
+
+                        $totalAllocated += $allocation;
+                    }
+                }
+
+                // 4. Decrement Customer Outstanding Balance
+                $customer = Customer::find($cheque->customer_id);
+                $reduction = $totalAllocated > 0 ? $totalAllocated : $chequeAmount;
+                if ($customer) {
+                    $customer->decrement('outstanding_balance', min($customer->outstanding_balance, $reduction));
+                }
+
+                // 5. Create Income entry in FinanceRecord
+                FinanceRecord::create([
+                    'record_type' => 'income',
+                    'reference_type' => 'Cheque',
+                    'reference_id' => $cheque->id,
+                    'amount' => $chequeAmount,
+                    'description' => "Cleared Cheque #{$cheque->cheque_number} from customer " . ($customer->name ?? 'Unknown'),
+                    'record_date' => $clearanceDate,
+                ]);
 
                 $this->logActivity('CHEQUE_CLEARED', 'Cheque', "Cheque #{$cheque->cheque_number} marked CLEARED. Amount: {$cheque->amount}", $data);
             } elseif ($newStatus === 'bounced') {
@@ -303,18 +405,22 @@ class ChequeController extends Controller implements HasMiddleware
     public function getActiveList(Request $request)
     {
         try {
-            $query = Cheque::pending();
+            $query = Cheque::query();
+
+            if ($request->has('status') && $request->status != '') {
+                $query->byStatus($request->status);
+            }
 
             if ($request->has('customer_id') && $request->customer_id != '') {
                 $query->byCustomer($request->customer_id);
             }
 
-            $cheques = $query->orderBy('cheque_date', 'asc')
+            $cheques = $query->orderBy('cheque_date', 'desc')
                 ->get(['id', 'cheque_number', 'bank_name', 'amount', 'cheque_date', 'customer_id', 'sale_id', 'status']);
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Pending cheques retrieved successfully',
+                'message' => 'Cheque list retrieved successfully',
                 'data' => $cheques,
             ], 200);
         } catch (\Throwable $th) {

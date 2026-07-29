@@ -41,6 +41,7 @@ class UserController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'User', 'Viewed user list');
             $perPage = $request->get('per_page', 15);
 
             $query = User::with(['roles']);
@@ -110,17 +111,20 @@ class UserController extends Controller implements HasMiddleware
             // Send Welcome Email if email is provided
             if (!empty($user->email)) {
                 try {
+                    $frontendUrl = rtrim(config('app.frontend_url', config('app.url')), '/');
                     $mailData = [
                         'user' => $user->toArray(),
                         'password' => $rawPassword,
                         'role' => $user->roles->pluck('name')->implode(', '),
-                        'login_url' => config('app.url') . '/login',
+                        'login_url' => $frontendUrl . '/login',
                         'created_by' => $authUser->name ?? 'System',
                     ];
 
                     Mail::to($user->email)->send(new UserCreateMail($mailData));
+                    $this->logActivity('EMAIL_SENT', 'User', "Welcome email sent to user: {$user->username} ({$user->email})", ['user_id' => $user->id, 'email' => $user->email]);
                 } catch (\Throwable $mailEx) {
                     Log::warning("Failed to send welcome email to user {$user->username}: " . $mailEx->getMessage());
+                    $this->logActivity('EMAIL_FAILED', 'User', "Failed to send welcome email to user: {$user->username} ({$user->email}) - " . $mailEx->getMessage(), ['user_id' => $user->id, 'email' => $user->email, 'error' => $mailEx->getMessage()], 'warning');
                 }
             }
 
@@ -154,6 +158,8 @@ class UserController extends Controller implements HasMiddleware
                     'message' => 'User not found',
                 ], 404);
             }
+
+            $this->logActivity('SHOW', 'User', "Viewed user: {$user->name} ({$user->username})");
 
             return response()->json([
                 'status' => 'success',
@@ -194,7 +200,7 @@ class UserController extends Controller implements HasMiddleware
                     $user->profile_image,
                     'users'
                 );
-            } elseif ($request->exists('profile_image') && empty($request->profile_image)) {
+            } elseif ($request->exists('profile_image') && (empty($request->profile_image) || $request->profile_image === 'null')) {
                 $this->deleteFile($user->profile_image);
                 $data['profile_image'] = null;
             } else {

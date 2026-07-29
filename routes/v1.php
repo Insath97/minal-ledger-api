@@ -26,7 +26,7 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
 
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('me', [AuthController::class, 'me']);
-    Route::put('profile', [AuthController::class, 'updateProfile']);
+    Route::post('profile', [AuthController::class, 'updateProfile']);
 
     Route::get('permissions/list', [PermissionController::class, 'getPermissionList']);
     Route::apiResource('permissions', PermissionController::class);
@@ -72,9 +72,6 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
     Route::apiResource('payments', PaymentController::class);
 
     // Expenses
-    Route::prefix('expenses')->group(function () {
-        Route::get('summary', [ExpenseController::class, 'getSummary']);
-    });
     Route::apiResource('expenses', ExpenseController::class);
 
     // Dashboard

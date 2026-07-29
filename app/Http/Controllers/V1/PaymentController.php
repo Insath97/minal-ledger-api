@@ -35,6 +35,7 @@ class PaymentController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Payment', 'Viewed payment list');
             $perPage = $request->get('per_page', 15);
             $query = Payment::with(['customer:id,code,name,phone', 'creator:id,name', 'paymentSales.sale:id,reference_number,total_amount,due_amount']);
 
@@ -218,6 +219,8 @@ class PaymentController extends Controller implements HasMiddleware
                     'message' => 'Payment not found',
                 ], 404);
             }
+
+            $this->logActivity('SHOW', 'Payment', "Viewed payment ID: {$payment->id}");
 
             return response()->json([
                 'status' => 'success',

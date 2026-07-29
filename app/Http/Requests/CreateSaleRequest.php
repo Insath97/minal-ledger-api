@@ -24,7 +24,7 @@ class CreateSaleRequest extends FormRequest
         return [
             'business_type' => 'required|in:retail,wholesale',
             'customer_id' => 'required_if:business_type,wholesale|nullable|exists:customers,id',
-            'invoice_number' => 'nullable|string|max:100',
+            'invoice_number' => 'nullable|string|max:100|unique:sales,invoice_number',
             'bill_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'total_amount' => 'required|numeric|min:0.01',
             'paid_amount' => 'sometimes|numeric|min:0|lte:total_amount',

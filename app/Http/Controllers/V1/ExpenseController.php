@@ -23,7 +23,6 @@ class ExpenseController extends Controller implements HasMiddleware
     {
         return [
             new Middleware('permission:Expense Index', ['only' => ['index', 'show']]),
-            new Middleware('permission:Expense Summary', ['only' => ['getSummary']]),
             new Middleware('permission:Expense Create', ['only' => ['store']]),
             new Middleware('permission:Expense Update', ['only' => ['update']]),
             new Middleware('permission:Expense Delete', ['only' => ['destroy']]),
@@ -36,8 +35,9 @@ class ExpenseController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Expense', 'Viewed expense list');
             $perPage = $request->get('per_page', 15);
-            $query = Expense::with(['creator:id,name']);
+            $query = Expense::with(['creator:id,name', 'items']);
 
             if ($request->has('search') && $request->search != '') {
                 $query->search($request->search);
@@ -162,6 +162,8 @@ class ExpenseController extends Controller implements HasMiddleware
                     'message' => 'Expense not found',
                 ], 404);
             }
+
+            $this->logActivity('SHOW', 'Expense', "Viewed expense: {$expense->title}");
 
             return response()->json([
                 'status' => 'success',
@@ -309,45 +311,6 @@ class ExpenseController extends Controller implements HasMiddleware
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to delete expense',
-                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
-            ], 500);
-        }
-    }
-
-    /**
-     * Get expense summary totals grouped by category.
-     */
-    public function getSummary(Request $request)
-    {
-        try {
-            $query = Expense::query();
-
-            if ($request->has('date_from') && $request->date_from != '') {
-                $query->whereDate('expense_date', '>=', $request->date_from);
-            }
-
-            if ($request->has('date_to') && $request->date_to != '') {
-                $query->whereDate('expense_date', '<=', $request->date_to);
-            }
-
-            $summary = $query->select('category', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as total_count'))
-                ->groupBy('category')
-                ->get();
-
-            $grandTotal = $summary->sum('total_amount');
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Expense summary retrieved successfully',
-                'data' => [
-                    'grand_total' => (float) $grandTotal,
-                    'by_category' => $summary,
-                ],
-            ], 200);
-        } catch (\Throwable $th) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to retrieve expense summary',
                 'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }

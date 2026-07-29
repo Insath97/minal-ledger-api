@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Cheque;
 use App\Models\Customer;
 use App\Models\Expense;
+use App\Models\FinanceRecord;
 use App\Models\Payment;
 use App\Models\Sale;
+use App\Traits\ActivityLogTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -17,13 +19,19 @@ use Illuminate\Support\Facades\DB;
 
 class ReportController extends Controller implements HasMiddleware
 {
+    use ActivityLogTrait;
+
     public static function middleware(): array
     {
         return [
-            new Middleware('permission:Reports', ['only' => [
-                'salesReport', 'customerStatement', 'chequeReport',
-                'paymentReport', 'expenseSummary', 'monthlySummary', 'duesAging', 'pnl',
-            ]]),
+            new Middleware('permission:Report Sales', ['only' => ['salesReport']]),
+            new Middleware('permission:Report Customer Statement', ['only' => ['customerStatement']]),
+            new Middleware('permission:Report Cheques', ['only' => ['chequeReport']]),
+            new Middleware('permission:Report Payments', ['only' => ['paymentReport']]),
+            new Middleware('permission:Report Expense Summary', ['only' => ['expenseSummary']]),
+            new Middleware('permission:Report Monthly Summary', ['only' => ['monthlySummary']]),
+            new Middleware('permission:Report Dues Aging', ['only' => ['duesAging']]),
+            new Middleware('permission:Report PnL', ['only' => ['pnl']]),
         ];
     }
 
@@ -38,6 +46,8 @@ class ReportController extends Controller implements HasMiddleware
             $customerId = $request->get('customer_id');
             $businessType = $request->get('business_type');
             $paymentStatus = $request->get('payment_status');
+
+            $this->logActivity('REPORT_GENERATE', 'Report', 'Generated Sales Report', ['date_from' => $dateFrom, 'date_to' => $dateTo]);
 
             $query = Sale::with('customer:id,code,name,phone')
                 ->whereBetween('sale_date', [$dateFrom, $dateTo]);
@@ -85,6 +95,8 @@ class ReportController extends Controller implements HasMiddleware
             $customerId = $request->get('customer_id');
             $dateFrom = $request->get('date_from');
             $dateTo = $request->get('date_to');
+
+            $this->logActivity('REPORT_GENERATE', 'Report', "Generated Customer Statement" . ($customerId ? " for customer ID {$customerId}" : ''));
 
             if (!$customerId) {
                 return response()->json([
@@ -178,6 +190,8 @@ class ReportController extends Controller implements HasMiddleware
             $bankName = $request->get('bank_name');
             $search = $request->get('search');
 
+            $this->logActivity('REPORT_GENERATE', 'Report', 'Generated Cheque Report');
+
             $query = Cheque::with('customer:id,code,name');
 
             if ($dateFrom) $query->where('cheque_date', '>=', $dateFrom);
@@ -234,6 +248,8 @@ class ReportController extends Controller implements HasMiddleware
             $paymentMethod = $request->get('payment_method');
             $customerId = $request->get('customer_id');
 
+            $this->logActivity('REPORT_GENERATE', 'Report', 'Generated Payment Report');
+
             $query = Payment::with('customer:id,code,name')
                 ->whereBetween('payment_date', [$dateFrom, $dateTo]);
 
@@ -285,115 +301,137 @@ class ReportController extends Controller implements HasMiddleware
     public function expenseSummary(Request $request): JsonResponse
     {
         try {
-            $year = $request->get('year', date('Y'));
+            $year    = (int) $request->get('year', date('Y'));
             $dateFrom = $request->get('date_from');
-            $dateTo = $request->get('date_to');
+            $dateTo   = $request->get('date_to');
 
-            // Monthly trend
-            $monthly = Expense::select(
-                DB::raw('MONTH(expense_date) as month'),
-                DB::raw('SUM(amount) as total_amount'),
-                DB::raw('COUNT(*) as count')
-            )
-            ->whereYear('expense_date', $year)
-            ->groupBy(DB::raw('MONTH(expense_date)'))
-            ->orderBy('month', 'asc')
-            ->get();
+            $this->logActivity('REPORT_GENERATE', 'Report', "Generated Expense Summary for year {$year}");
 
-            $monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            // ── Monthly trend (ORM) ──────────────────────────────────────
+            $monthlyRaw = Expense::selectRaw('MONTH(expense_date) as month, SUM(amount) as total_amount, COUNT(*) as count')
+                ->whereYear('expense_date', $year)
+                ->groupByRaw('MONTH(expense_date)')
+                ->orderByRaw('MONTH(expense_date) ASC')
+                ->get();
+
+            $monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             $monthlyData = [];
             for ($m = 1; $m <= 12; $m++) {
-                $record = $monthly->firstWhere('month', $m);
+                $row = $monthlyRaw->first(fn ($item) => (int) $item->month === $m);
                 $monthlyData[] = [
-                    'month' => $monthNames[$m - 1],
-                    'total_amount' => $record ? (float) $record->total_amount : 0.0,
-                    'count' => $record ? (int) $record->count : 0,
+                    'month'        => $monthNames[$m - 1],
+                    'total_amount' => $row ? (float) $row->total_amount : 0.0,
+                    'count'        => $row ? (int)   $row->count        : 0,
                 ];
             }
 
-            // Category breakdown
-            $catQuery = Expense::select('category', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as count'));
-            if ($dateFrom) $catQuery->where('expense_date', '>=', $dateFrom);
-            if ($dateTo) $catQuery->where('expense_date', '<=', $dateTo);
-            else $catQuery->whereYear('expense_date', $year);
-            $categories = $catQuery->groupBy('category')->orderByDesc('total_amount')->get();
+            // ── Category breakdown (ORM) ─────────────────────────────────
+            $catQuery = Expense::selectRaw('category, SUM(amount) as total_amount, COUNT(*) as count');
+            if ($dateFrom) {
+                $catQuery->whereDate('expense_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $catQuery->whereDate('expense_date', '<=', $dateTo);
+            } else {
+                $catQuery->whereYear('expense_date', $year);
+            }
+            $categoriesRaw = $catQuery->groupBy('category')->orderByRaw('SUM(amount) DESC')->get();
 
-            $grandTotal = (float) $categories->sum('total_amount');
+            $categories = $categoriesRaw->map(fn ($cat) => [
+                'category'     => $cat->category,
+                'total_amount' => (float) $cat->total_amount,
+                'count'        => (int)   $cat->count,
+            ])->values();
+
+            // ── Grand total (ORM) ────────────────────────────────────────
+            $totalQuery = Expense::query();
+            if ($dateFrom) {
+                $totalQuery->whereDate('expense_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $totalQuery->whereDate('expense_date', '<=', $dateTo);
+            } else {
+                $totalQuery->whereYear('expense_date', $year);
+            }
+            $grandTotal = (float) $totalQuery->sum('amount');
 
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'Expense summary retrieved successfully',
-                'data' => [
-                    'year' => (int) $year,
+                'data'    => [
+                    'year'        => $year,
                     'grand_total' => $grandTotal,
-                    'monthly' => $monthlyData,
+                    'monthly'     => $monthlyData,
                     'by_category' => $categories,
                 ],
             ], 200);
         } catch (\Throwable $th) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Failed to retrieve expense summary',
-                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+                'error'   => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }
     }
 
     /**
-     * Monthly Summary — year overview with income vs expense vs profit
+     * Monthly Summary — year overview with income vs expense vs profit.
+     * Income source: finance_records (captures payments, cleared cheques, sale upfront amounts).
+     * Expense source: finance_records (captures all recorded expenses).
      */
     public function monthlySummary(Request $request): JsonResponse
     {
         try {
-            $year = $request->get('year', date('Y'));
+            $year = (int) $request->get('year', date('Y'));
 
-            $records = DB::table('finance_records')
-                ->select(
-                    DB::raw('MONTH(record_date) as month'),
-                    DB::raw("SUM(CASE WHEN record_type = 'income' THEN amount ELSE 0 END) as income"),
-                    DB::raw("SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense")
-                )
-                ->whereYear('record_date', $year)
-                ->groupBy(DB::raw('MONTH(record_date)'))
-                ->orderBy('month', 'asc')
-                ->get();
+            $this->logActivity('REPORT_GENERATE', 'Report', "Generated Monthly Summary for year {$year}");
 
-            $monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            $monthly = [];
-            $totalIncome = 0;
-            $totalExpense = 0;
+            // Single query: finance_records as source of truth for both income & expense
+            $records = FinanceRecord::selectRaw(
+                "MONTH(record_date) as month,
+                 SUM(CASE WHEN record_type = 'income'  THEN amount ELSE 0 END) as income,
+                 SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense"
+            )
+            ->whereYear('record_date', $year)
+            ->groupByRaw('MONTH(record_date)')
+            ->get();
+
+            $monthNames   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            $monthly      = [];
+            $totalIncome  = 0.0;
+            $totalExpense = 0.0;
 
             for ($m = 1; $m <= 12; $m++) {
-                $record = $records->firstWhere('month', $m);
-                $inc = $record ? (float) $record->income : 0.0;
-                $exp = $record ? (float) $record->expense : 0.0;
-                $totalIncome += $inc;
+                $rec = $records->first(fn ($item) => (int) $item->month === $m);
+                $inc = $rec ? (float) $rec->income  : 0.0;
+                $exp = $rec ? (float) $rec->expense : 0.0;
+                $totalIncome  += $inc;
                 $totalExpense += $exp;
 
                 $monthly[] = [
-                    'month' => $monthNames[$m - 1],
-                    'income' => $inc,
+                    'month'   => $monthNames[$m - 1],
+                    'income'  => $inc,
                     'expense' => $exp,
-                    'profit' => $inc - $exp,
+                    'profit'  => $inc - $exp,
                 ];
             }
 
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'Monthly summary retrieved successfully',
-                'data' => [
-                    'year' => (int) $year,
-                    'total_income' => $totalIncome,
+                'data'    => [
+                    'year'          => $year,
+                    'total_income'  => $totalIncome,
                     'total_expense' => $totalExpense,
-                    'total_profit' => $totalIncome - $totalExpense,
-                    'monthly' => $monthly,
+                    'total_profit'  => $totalIncome - $totalExpense,
+                    'monthly'       => $monthly,
                 ],
             ], 200);
         } catch (\Throwable $th) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Failed to retrieve monthly summary',
-                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+                'error'   => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -404,6 +442,7 @@ class ReportController extends Controller implements HasMiddleware
     public function duesAging(Request $request): JsonResponse
     {
         try {
+            $this->logActivity('REPORT_GENERATE', 'Report', 'Generated Customer Dues Aging Analysis Report');
             $unpaidSales = Sale::with('customer:id,code,name,phone')
                 ->whereIn('payment_status', ['unpaid', 'partial'])
                 ->where('due_amount', '>', 0)
@@ -470,51 +509,55 @@ class ReportController extends Controller implements HasMiddleware
     }
 
     /**
-     * Get Monthly Profit and Loss Breakdown.
+     * Profit & Loss — monthly breakdown.
+     * Income source: finance_records (captures payments, cleared cheques, sale upfront amounts).
+     * Expense source: finance_records (captures all recorded expenses).
      */
     public function pnl(Request $request): JsonResponse
     {
         try {
-            $year = $request->get('year', date('Y'));
+            $year = (int) $request->get('year', date('Y'));
 
-            $records = \App\Models\FinanceRecord::select(
-                DB::raw('MONTH(record_date) as month'),
-                DB::raw("SUM(CASE WHEN record_type = 'income' THEN amount ELSE 0 END) as income"),
-                DB::raw("SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense")
+            $this->logActivity('REPORT_GENERATE', 'Report', "Generated Monthly Profit & Loss Breakdown for year {$year}");
+
+            // Single query: finance_records as source of truth
+            $records = FinanceRecord::selectRaw(
+                "MONTH(record_date) as month,
+                 SUM(CASE WHEN record_type = 'income'  THEN amount ELSE 0 END) as income,
+                 SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense"
             )
             ->whereYear('record_date', $year)
-            ->groupBy(DB::raw('MONTH(record_date)'))
-            ->orderBy('month', 'asc')
+            ->groupByRaw('MONTH(record_date)')
             ->get();
 
             $monthlyBreakdown = [];
             for ($m = 1; $m <= 12; $m++) {
-                $monthRecord = $records->firstWhere('month', $m);
-                $inc = $monthRecord ? (float) $monthRecord->income : 0.00;
-                $exp = $monthRecord ? (float) $monthRecord->expense : 0.00;
+                $rec = $records->first(fn ($item) => (int) $item->month === $m);
+                $inc = $rec ? (float) $rec->income  : 0.00;
+                $exp = $rec ? (float) $rec->expense : 0.00;
 
                 $monthlyBreakdown[] = [
                     'month_number' => $m,
-                    'month_name' => date('F', mktime(0, 0, 0, $m, 1)),
-                    'income' => $inc,
-                    'expense' => $exp,
-                    'net_profit' => $inc - $exp,
+                    'month_name'   => date('F', mktime(0, 0, 0, $m, 1)),
+                    'income'       => $inc,
+                    'expense'      => $exp,
+                    'net_profit'   => $inc - $exp,
                 ];
             }
 
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'Monthly Profit & Loss breakdown retrieved successfully',
-                'data' => [
-                    'year' => (int) $year,
+                'data'    => [
+                    'year'    => $year,
                     'monthly' => $monthlyBreakdown,
                 ],
             ], 200);
         } catch (\Throwable $th) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Failed to retrieve P&L breakdown',
-                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+                'error'   => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }
     }

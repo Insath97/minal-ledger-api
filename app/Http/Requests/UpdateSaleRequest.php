@@ -21,22 +21,34 @@ class UpdateSaleRequest extends FormRequest
      */
     public function rules(): array
     {
-        return [
+        $rules = [
             'business_type' => 'sometimes|required|in:retail,wholesale',
             'customer_id' => 'nullable|exists:customers,id',
-            'invoice_number' => 'nullable|string|max:100',
+            'invoice_number' => 'nullable|string|max:100|unique:sales,invoice_number,' . $this->route('sale'),
             'total_amount' => 'sometimes|required|numeric|min:0.01',
             'paid_amount' => 'sometimes|numeric|min:0',
             'sale_date' => 'sometimes|required|date',
-            'bill_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'notes' => 'nullable|string',
             'payment_method' => 'nullable|in:cash,credit_card,bank_transfer,cheque',
             'cheque_number' => 'required_if:payment_method,cheque|nullable|string|max:50',
             'bank_name' => 'required_if:payment_method,cheque|nullable|string|max:100',
             'cheque_date' => 'required_if:payment_method,cheque|nullable|date',
             'cheque_amount' => 'required_if:payment_method,cheque|nullable|numeric|min:0.01',
-            'cheque_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ];
+
+        if ($this->hasFile('bill_image')) {
+            $rules['bill_image'] = 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048';
+        } else {
+            $rules['bill_image'] = 'nullable|string';
+        }
+
+        if ($this->hasFile('cheque_image')) {
+            $rules['cheque_image'] = 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048';
+        } else {
+            $rules['cheque_image'] = 'nullable|string';
+        }
+
+        return $rules;
     }
 
     /**

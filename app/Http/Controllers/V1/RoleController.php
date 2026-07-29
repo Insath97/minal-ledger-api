@@ -29,6 +29,7 @@ class RoleController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Role', 'Viewed role list');
             $perPage = $request->get('per_page', 15);
 
             $query = Role::with('permissions');
@@ -116,6 +117,8 @@ class RoleController extends Controller implements HasMiddleware
                     'data' => []
                 ], 404);
             }
+
+            $this->logActivity('SHOW', 'Role', "Viewed role: {$role->name}");
 
             return response()->json([
                 'status' => 'success',
@@ -240,7 +243,7 @@ class RoleController extends Controller implements HasMiddleware
 
             $query = Role::query();
 
-            if ($user->hasRole('Super Admin')) {
+            if (!$user->hasRole('Super Admin')) {
                 $query->where('name', '!=', 'Super Admin');
             }
 

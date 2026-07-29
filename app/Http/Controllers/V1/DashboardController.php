@@ -9,6 +9,7 @@ use App\Models\FinanceRecord;
 use App\Models\Payment;
 use App\Models\Sale;
 use App\Models\Cheque;
+use App\Traits\ActivityLogTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller implements HasMiddleware
 {
+    use ActivityLogTrait;
+
     public static function middleware(): array
     {
         return [
@@ -27,6 +30,7 @@ class DashboardController extends Controller implements HasMiddleware
     public function getStats(Request $request): JsonResponse
     {
         try {
+            $this->logActivity('DASHBOARD_STATS', 'Dashboard', 'Viewed dashboard stats overview');
             $now = now();
             $currentMonthStart = $now->copy()->startOfMonth()->toDateString();
             $currentMonthEnd = $now->copy()->endOfMonth()->toDateString();
@@ -45,10 +49,14 @@ class DashboardController extends Controller implements HasMiddleware
             $prevMonthExpenses = (float) Expense::whereBetween('expense_date', [$prevMonthStart, $prevMonthEnd])->sum('amount');
             $expensesChange = $prevMonthExpenses > 0 ? round(($currentMonthExpenses - $prevMonthExpenses) / $prevMonthExpenses * 100, 1) : 0;
 
-            // --- Total Received (Payments) ---
-            $totalReceived = (float) Payment::sum('total_amount');
-            $currentMonthReceived = (float) Payment::whereBetween('payment_date', [$currentMonthStart, $currentMonthEnd])->sum('total_amount');
-            $prevMonthReceived = (float) Payment::whereBetween('payment_date', [$prevMonthStart, $prevMonthEnd])->sum('total_amount');
+            // --- Total Received (all income from finance_records: payments + cleared cheques + sale upfronts) ---
+            $totalReceived = (float) FinanceRecord::where('record_type', 'income')->sum('amount');
+            $currentMonthReceived = (float) FinanceRecord::where('record_type', 'income')
+                ->whereBetween('record_date', [$currentMonthStart, $currentMonthEnd])
+                ->sum('amount');
+            $prevMonthReceived = (float) FinanceRecord::where('record_type', 'income')
+                ->whereBetween('record_date', [$prevMonthStart, $prevMonthEnd])
+                ->sum('amount');
             $receivedChange = $prevMonthReceived > 0 ? round(($currentMonthReceived - $prevMonthReceived) / $prevMonthReceived * 100, 1) : 0;
 
             // --- Outstanding Dues ---
@@ -90,70 +98,70 @@ class DashboardController extends Controller implements HasMiddleware
             $year = $request->get('year', date('Y'));
             $month = $request->get('month');
 
+            $this->logActivity('DASHBOARD_ANALYTICS', 'Dashboard', "Viewed dashboard analytics (Year: {$year}" . ($month ? ", Month: {$month}" : '') . ')');
+
             if ($month) {
-                // Daily breakdown for a specific month
-                $daily = FinanceRecord::select(
-                    DB::raw('DAY(record_date) as day'),
-                    DB::raw("SUM(CASE WHEN record_type = 'income' THEN amount ELSE 0 END) as income"),
-                    DB::raw("SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense")
+                // Daily breakdown — use finance_records as single source of truth
+                $daily = FinanceRecord::selectRaw(
+                    "DAY(record_date) as day,
+                     SUM(CASE WHEN record_type = 'income'  THEN amount ELSE 0 END) as income,
+                     SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense"
                 )
                 ->whereYear('record_date', $year)
                 ->whereMonth('record_date', $month)
-                ->groupBy(DB::raw('DAY(record_date)'))
-                ->orderBy('day', 'asc')
+                ->groupByRaw('DAY(record_date)')
                 ->get();
 
                 $daysInMonth = \Carbon\Carbon::createFromDate((int)$year, (int)$month, 1)->daysInMonth;
                 $dailyData = [];
                 for ($d = 1; $d <= $daysInMonth; $d++) {
-                    $record = $daily->firstWhere('day', $d);
+                    $rec = $daily->first(fn ($item) => (int) $item->day === $d);
                     $dailyData[] = [
-                        'label' => $d,
-                        'income' => $record ? (float) $record->income : 0.0,
-                        'expense' => $record ? (float) $record->expense : 0.0,
+                        'label'   => $d,
+                        'income'  => $rec ? (float) $rec->income  : 0.0,
+                        'expense' => $rec ? (float) $rec->expense : 0.0,
                     ];
                 }
 
                 return response()->json([
-                    'status' => 'success',
+                    'status'  => 'success',
                     'message' => 'Daily analytics retrieved successfully',
-                    'data' => [
-                        'type' => 'daily',
-                        'year' => (int) $year,
-                        'month' => (int) $month,
+                    'data'    => [
+                        'type'   => 'daily',
+                        'year'   => (int) $year,
+                        'month'  => (int) $month,
                         'labels' => $dailyData,
                     ],
                 ], 200);
             }
 
-            // Monthly breakdown for a year
-            $monthly = FinanceRecord::select(
-                DB::raw('MONTH(record_date) as month'),
-                DB::raw("SUM(CASE WHEN record_type = 'income' THEN amount ELSE 0 END) as income"),
-                DB::raw("SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense")
+            // Monthly breakdown — use finance_records as single source of truth
+            $monthly = FinanceRecord::selectRaw(
+                "MONTH(record_date) as month,
+                 SUM(CASE WHEN record_type = 'income'  THEN amount ELSE 0 END) as income,
+                 SUM(CASE WHEN record_type = 'expense' THEN amount ELSE 0 END) as expense"
             )
             ->whereYear('record_date', $year)
-            ->groupBy(DB::raw('MONTH(record_date)'))
-            ->orderBy('month', 'asc')
+            ->groupByRaw('MONTH(record_date)')
             ->get();
 
-            $monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            $monthNames  = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             $monthlyData = [];
             for ($m = 1; $m <= 12; $m++) {
-                $record = $monthly->firstWhere('month', $m);
+                $rec = $monthly->first(fn ($item) => (int) $item->month === $m);
                 $monthlyData[] = [
-                    'label' => $monthNames[$m - 1],
-                    'income' => $record ? (float) $record->income : 0.0,
-                    'expense' => $record ? (float) $record->expense : 0.0,
+                    'label'   => $monthNames[$m - 1],
+                    'income'  => $rec ? (float) $rec->income  : 0.0,
+                    'expense' => $rec ? (float) $rec->expense : 0.0,
                 ];
             }
 
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'Monthly analytics retrieved successfully',
-                'data' => [
-                    'type' => 'monthly',
-                    'year' => (int) $year,
+                'data'    => [
+                    'type'   => 'monthly',
+                    'year'   => (int) $year,
                     'labels' => $monthlyData,
                 ],
             ], 200);
@@ -172,6 +180,7 @@ class DashboardController extends Controller implements HasMiddleware
     public function getActivity(): JsonResponse
     {
         try {
+            $this->logActivity('DASHBOARD_ACTIVITY', 'Dashboard', 'Viewed recent dashboard activity');
             // Recent 5 sales
             $recentSales = Sale::with('customer:id,name')
                 ->orderBy('created_at', 'desc')
