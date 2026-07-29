@@ -153,6 +153,43 @@ class CustomerImageUpdateTest extends TestCase
         $this->assertFalse(File::exists(public_path($oldPath)));
     }
 
+    public function test_can_explicitly_delete_profile_image_by_sending_null_string()
+    {
+        // 1. Create customer with an image
+        $profile = UploadedFile::fake()->image('profile.jpg');
+        $customer = Customer::create([
+            'code' => 'CUST-99999',
+            'name' => 'John Doe',
+            'phone' => '0771234567',
+        ]);
+
+        $response = $this->putJson("/api/v1/customers/{$customer->id}", [
+            'name' => 'John Doe',
+            'phone' => '0771234567',
+            'profile_image' => $profile,
+        ]);
+
+        $response->assertStatus(200);
+        $customer->refresh();
+        $oldPath = $customer->profile_image;
+        $this->trackFile($oldPath);
+        $this->assertTrue(File::exists(public_path($oldPath)));
+
+        // 2. Send request to update with profile_image set to literal string "null"
+        $response2 = $this->putJson("/api/v1/customers/{$customer->id}", [
+            'name' => 'John Doe',
+            'phone' => '0771234567',
+            'profile_image' => 'null',
+        ]);
+
+        $response2->assertStatus(200);
+        $customer->refresh();
+
+        // Verify path is null in DB and file is deleted from filesystem
+        $this->assertNull($customer->profile_image);
+        $this->assertFalse(File::exists(public_path($oldPath)));
+    }
+
     public function test_omitting_profile_image_leaves_existing_intact()
     {
         // 1. Create customer with an image

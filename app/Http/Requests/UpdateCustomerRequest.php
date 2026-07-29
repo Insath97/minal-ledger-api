@@ -24,7 +24,7 @@ class UpdateCustomerRequest extends FormRequest
     {
         $id = $this->route('customer') ?? $this->route('id');
 
-        return [
+        $rules = [
             'code' => 'sometimes|required|string|max:50|unique:customers,code,' . $id,
             'name' => 'sometimes|required|string|max:255',
             'email' => 'nullable|email|max:255',
@@ -35,12 +35,24 @@ class UpdateCustomerRequest extends FormRequest
             'address_line1' => 'nullable|string|max:255',
             'address_line2' => 'nullable|string|max:255',
             'city' => 'nullable|string|max:100',
-            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-            'nic_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
             'outstanding_balance' => 'sometimes|numeric|min:0',
             'is_active' => 'sometimes|boolean',
             'notes' => 'nullable|string',
         ];
+
+        if ($this->hasFile('profile_image')) {
+            $rules['profile_image'] = 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048';
+        } else {
+            $rules['profile_image'] = 'nullable|string';
+        }
+
+        if ($this->hasFile('nic_image')) {
+            $rules['nic_image'] = 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048';
+        } else {
+            $rules['nic_image'] = 'nullable|string';
+        }
+
+        return $rules;
     }
 
     /**

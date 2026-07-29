@@ -38,6 +38,7 @@ class CustomerController extends Controller implements HasMiddleware
     public function index(Request $request)
     {
         try {
+            $this->logActivity('INDEX', 'Customer', 'Viewed customer list');
             $perPage = $request->get('per_page', 15);
             $query = Customer::query();
 
@@ -121,6 +122,8 @@ class CustomerController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            $this->logActivity('SHOW', 'Customer', "Viewed customer: {$customer->name} ({$customer->code})");
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Customer retrieved successfully',
@@ -155,7 +158,7 @@ class CustomerController extends Controller implements HasMiddleware
             // Handle Profile Image
             if ($request->hasFile('profile_image')) {
                 $data['profile_image'] = $this->handleFileUpload($request, 'profile_image', $customer->profile_image, 'customer');
-            } elseif ($request->exists('profile_image') && empty($request->profile_image)) {
+            } elseif ($request->exists('profile_image') && (empty($request->profile_image) || $request->profile_image === 'null')) {
                 $this->deleteFile($customer->profile_image);
                 $data['profile_image'] = null;
             } else {
@@ -165,7 +168,7 @@ class CustomerController extends Controller implements HasMiddleware
             // Handle NIC Image
             if ($request->hasFile('nic_image')) {
                 $data['nic_image'] = $this->handleFileUpload($request, 'nic_image', $customer->nic_image, 'customer');
-            } elseif ($request->exists('nic_image') && empty($request->nic_image)) {
+            } elseif ($request->exists('nic_image') && (empty($request->nic_image) || $request->nic_image === 'null')) {
                 $this->deleteFile($customer->nic_image);
                 $data['nic_image'] = null;
             } else {
@@ -208,15 +211,19 @@ class CustomerController extends Controller implements HasMiddleware
             $customerCode = $customer->code;
             $customerName = $customer->name;
 
-            if (!empty($customer->profile_image)) {
-                $this->deleteFile($customer->profile_image);
-            }
-
-            if (!empty($customer->nic_image)) {
-                $this->deleteFile($customer->nic_image);
-            }
+            $profileImage = $customer->profile_image;
+            $nicImage = $customer->nic_image;
 
             $customer->delete();
+
+            // Only delete files if database deletion succeeded
+            if (!empty($profileImage)) {
+                $this->deleteFile($profileImage);
+            }
+
+            if (!empty($nicImage)) {
+                $this->deleteFile($nicImage);
+            }
 
             $this->logActivity('DELETE', 'Customer', "Deleted customer: {$customerName} ({$customerCode})");
 
@@ -224,6 +231,20 @@ class CustomerController extends Controller implements HasMiddleware
                 'status' => 'success',
                 'message' => 'Customer deleted successfully',
             ], 200);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Check for integrity constraint violation (e.g. foreign key constraint restriction)
+            if ($e->getCode() === '23000' || (isset($e->errorInfo[0]) && $e->errorInfo[0] === '23000')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Cannot delete customer because they have active transactions (such as sales or cheques) associated with them. You can deactivate them instead.',
+                ], 422);
+            }
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to delete customer',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
+            ], 500);
         } catch (\Throwable $th) {
             return response()->json([
                 'status' => 'error',
