@@ -13,6 +13,19 @@ class UpdateUserRequest extends FormRequest
         return true;
     }
 
+    /**
+     * Convert string booleans from FormData before validation.
+     */
+    public function prepareForValidation(): void
+    {
+        if ($this->has('is_active')) {
+            $this->merge(['is_active' => filter_var($this->input('is_active'), FILTER_VALIDATE_BOOLEAN)]);
+        }
+        if ($this->has('can_login')) {
+            $this->merge(['can_login' => filter_var($this->input('can_login'), FILTER_VALIDATE_BOOLEAN)]);
+        }
+    }
+
     public function rules(): array
     {
         $id = $this->route('user') ?? $this->route('id');
@@ -23,12 +36,16 @@ class UpdateUserRequest extends FormRequest
             'email' => 'nullable|email|max:255|unique:users,email,' . $id,
             'phone' => 'nullable|string|max:20',
             'password' => 'nullable|string|min:6',
-            'confirm_password' => 'nullable|string|same:password',
             'is_active' => 'sometimes|boolean',
             'can_login' => 'sometimes|boolean',
             'roles' => 'sometimes|array',
             'roles.*' => 'string',
         ];
+
+        // Only validate confirm_password when password is provided
+        if ($this->filled('password')) {
+            $rules['confirm_password'] = 'required|string|same:password';
+        }
 
         if ($this->hasFile('profile_image')) {
             $rules['profile_image'] = 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048';

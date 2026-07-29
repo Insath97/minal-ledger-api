@@ -3,8 +3,13 @@
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
-// Root endpoint
+// Landing page
 Route::get('/', function () {
+    return view('api-landing');
+});
+
+// Root endpoint (JSON fallback)
+Route::get('/api', function () {
     return response()->json([
         'message' => 'Minal Ledger API',
         'version' => '1.0.0',

@@ -18,10 +18,10 @@ class CreateUserRequest extends FormRequest
         return [
             'name' => 'required|string|max:255',
             'username' => 'required|string|unique:users,username|max:100',
-            'email' => 'nullable|email|unique:users,email|max:255',
+            'email' => 'required|email|unique:users,email|max:255',
             'phone' => 'nullable|string|max:20',
             'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-            'password' => 'required|string|min:6',
+            'password' => 'nullable|string|min:6',
             'is_active' => 'sometimes|boolean',
             'can_login' => 'sometimes|boolean',
             'roles' => 'sometimes|array',

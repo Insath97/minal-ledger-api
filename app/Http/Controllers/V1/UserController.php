@@ -15,6 +15,7 @@ use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 class UserController extends Controller implements HasMiddleware
 {
@@ -84,8 +85,13 @@ class UserController extends Controller implements HasMiddleware
             $authUser = auth()->user();
             $data = $request->validated();
 
-            $rawPassword = $data['password'];
-            $data['password'] = Hash::make($data['password']);
+            // Auto-generate password if not provided
+            if (empty($data['password'])) {
+                $rawPassword = Str::random(12);
+            } else {
+                $rawPassword = $data['password'];
+            }
+            $data['password'] = Hash::make($rawPassword);
 
             // Handle Profile Image Upload
             if ($request->hasFile('profile_image')) {
