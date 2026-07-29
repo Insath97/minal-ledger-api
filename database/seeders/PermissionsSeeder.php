@@ -97,6 +97,9 @@ class PermissionsSeeder extends Seeder
             /* Activity Log Management */
             ['name' => 'ActivityLog Index', 'group_name' => 'Activity Log Management Permissions'],
             ['name' => 'ActivityLog Show', 'group_name' => 'Activity Log Management Permissions'],
+
+            /* Database Backup */
+            ['name' => 'Database Export', 'group_name' => 'Database Management Permissions'],
         ];
 
         foreach ($permissions as $permission) {

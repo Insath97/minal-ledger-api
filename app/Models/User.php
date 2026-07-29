@@ -34,6 +34,8 @@ class User extends Authenticatable implements JWTSubject, MustVerifyEmail
         'email_verified_at',
         'email_verification_token',
         'email_verification_token_expires_at',
+        'password_reset_token',
+        'password_reset_token_expires_at',
     ];
 
     /**
@@ -56,6 +58,7 @@ class User extends Authenticatable implements JWTSubject, MustVerifyEmail
         return [
             'email_verified_at' => 'datetime',
             'email_verification_token_expires_at' => 'datetime',
+            'password_reset_token_expires_at' => 'datetime',
             'password' => 'hashed',
             'last_login_at' => 'datetime',
             'is_active' => 'boolean',
@@ -135,5 +138,51 @@ class User extends Authenticatable implements JWTSubject, MustVerifyEmail
     public function hasVerifiedEmail(): bool
     {
         return !is_null($this->email_verified_at);
+    }
+
+    /**
+     * Generate a password reset token for the user.
+     */
+    public function generatePasswordResetToken(): string
+    {
+        $token = bin2hex(random_bytes(32));
+
+        $this->update([
+            'password_reset_token' => $token,
+            'password_reset_token_expires_at' => now()->addMinutes(30),
+        ]);
+
+        return $token;
+    }
+
+    /**
+     * Validate a password reset token.
+     */
+    public function validatePasswordResetToken(string $token): bool
+    {
+        if (
+            is_null($this->password_reset_token) ||
+            is_null($this->password_reset_token_expires_at)
+        ) {
+            return false;
+        }
+
+        if ($this->password_reset_token_expires_at->isPast()) {
+            $this->clearPasswordResetToken();
+            return false;
+        }
+
+        return hash_equals($this->password_reset_token, $token);
+    }
+
+    /**
+     * Clear the password reset token.
+     */
+    public function clearPasswordResetToken(): void
+    {
+        $this->update([
+            'password_reset_token' => null,
+            'password_reset_token_expires_at' => null,
+        ]);
     }
 }

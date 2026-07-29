@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Http\Requests\UpdateProfileRequest;
+use App\Http\Requests\ForgotPasswordRequest;
+use App\Http\Requests\ResetPasswordRequest;
+use App\Mail\PasswordResetMail;
+use Illuminate\Support\Facades\Mail;
 
 class AuthController extends Controller
 {
@@ -259,6 +263,139 @@ class AuthController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to update profile',
+                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Forgot Password - Send reset link email
+     */
+    public function forgotPassword(ForgotPasswordRequest $request)
+    {
+        try {
+            $user = User::where('email', $request->email)->first();
+
+            if (!$user) {
+                $this->logActivity('FORGOT_PASSWORD_FAILED', 'Auth', "Password reset requested for non-existent email: {$request->email}", [
+                    'email' => $request->email,
+                ], 'warning');
+
+                // Return success to prevent email enumeration
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Password reset link has been sent to your email address.',
+                ], 200);
+            }
+
+            // Generate token
+            $token = $user->generatePasswordResetToken();
+
+            // Build reset URL with email
+            $resetUrl = env('FRONTEND_URL', 'http://localhost:3000') . '/reset-password?token=' . $token . '&email=' . urlencode($user->email);
+
+            // Send email with独立 try-catch
+            try {
+                Mail::to($user->email)->send(new PasswordResetMail([
+                    'user' => [
+                        'name' => $user->name,
+                        'email' => $user->email,
+                    ],
+                    'reset_url' => $resetUrl,
+                    'token' => $token,
+                ]));
+
+                $this->logActivity('FORGOT_PASSWORD', 'Auth', "Password reset email sent successfully: {$user->email}", [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                ]);
+            } catch (\Throwable $emailError) {
+                // Log email failure but don't expose to user
+                $this->logActivity('FORGOT_PASSWORD_EMAIL_FAILED', 'Auth', "Failed to send password reset email to: {$user->email}", [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'error' => $emailError->getMessage(),
+                ], 'error');
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to send email. Please try again later.',
+                ], 500);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Password reset link has been sent to your email address.',
+            ], 200);
+        } catch (\Throwable $th) {
+            $this->logActivity('FORGOT_PASSWORD_ERROR', 'Auth', "Unexpected error during password reset request", [
+                'email' => $request->email,
+                'error' => $th->getMessage(),
+            ], 'error');
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to send password reset link',
+                'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Reset Password - Update password with token
+     */
+    public function resetPassword(ResetPasswordRequest $request)
+    {
+        try {
+            $user = User::where('email', $request->email)->first();
+
+            if (!$user) {
+                $this->logActivity('RESET_PASSWORD_FAILED', 'Auth', "Password reset attempted for non-existent user: {$request->email}", [
+                    'email' => $request->email,
+                ], 'warning');
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Invalid or expired reset token.',
+                ], 422);
+            }
+
+            if (!$user->validatePasswordResetToken($request->token)) {
+                $this->logActivity('RESET_PASSWORD_FAILED', 'Auth', "Invalid reset token used for: {$user->email}", [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                ], 'warning');
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Invalid or expired reset token.',
+                ], 422);
+            }
+
+            // Update password and clear token
+            $user->update([
+                'password' => $request->password,
+            ]);
+            $user->clearPasswordResetToken();
+
+            $this->logActivity('RESET_PASSWORD', 'Auth', "Password reset completed successfully: {$user->email}", [
+                'user_id' => $user->id,
+                'email' => $user->email,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Password has been reset successfully.',
+            ], 200);
+        } catch (\Throwable $th) {
+            $this->logActivity('RESET_PASSWORD_ERROR', 'Auth', "Unexpected error during password reset", [
+                'email' => $request->email ?? 'unknown',
+                'error' => $th->getMessage(),
+            ], 'error');
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to reset password',
                 'error' => config('app.debug') ? $th->getMessage() : 'Internal server error',
             ], 500);
         }

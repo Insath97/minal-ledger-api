@@ -13,12 +13,15 @@ use App\Http\Controllers\V1\ExpenseController;
 use App\Http\Controllers\V1\DashboardController;
 use App\Http\Controllers\V1\ActivityLogController;
 use App\Http\Controllers\V1\ReportController;
+use App\Http\Controllers\V1\DatabaseController;
 use Illuminate\Support\Facades\Route;
 
 /* public routes */
 
 Route::prefix('v1')->group(function () {
     Route::post('login', [AuthController::class, 'login'])->middleware('throttle:auth');
+    Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:auth');
+    Route::post('reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:auth');
 });
 
 /* protected routes */
@@ -98,4 +101,7 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
         Route::get('actions', [ActivityLogController::class, 'getActions']);
         Route::get('{id}', [ActivityLogController::class, 'show']);
     });
+
+    // Database Backup
+    Route::get('backup/database', [DatabaseController::class, 'export']);
 });
