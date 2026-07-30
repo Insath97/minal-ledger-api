@@ -14,6 +14,7 @@ use App\Http\Controllers\V1\DashboardController;
 use App\Http\Controllers\V1\ActivityLogController;
 use App\Http\Controllers\V1\ReportController;
 use App\Http\Controllers\V1\DatabaseController;
+use App\Http\Controllers\V1\SearchController;
 use Illuminate\Support\Facades\Route;
 
 /* public routes */
@@ -104,4 +105,7 @@ Route::middleware(['auth:api'])->prefix('v1')->group(function () {
 
     // Database Backup
     Route::get('backup/database', [DatabaseController::class, 'export']);
+
+    // Global Search
+    Route::get('search', [SearchController::class, 'search']);
 });
