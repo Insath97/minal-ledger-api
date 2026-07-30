@@ -23,6 +23,8 @@ return new class extends Migration
             $table->boolean('can_login')->default(true);
             $table->timestamp('last_login_at')->nullable();
             $table->string('last_login_ip')->nullable();
+            $table->string('password_reset_token')->nullable();
+            $table->timestamp('password_reset_token_expires_at')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });

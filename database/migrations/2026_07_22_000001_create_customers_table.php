@@ -23,6 +23,8 @@ return new class extends Migration
             $table->string('address_line1', 255)->nullable();
             $table->string('address_line2', 255)->nullable();
             $table->string('city', 100)->nullable();
+            $table->string('profile_image')->nullable();
+            $table->string('nic_image')->nullable();
             $table->decimal('outstanding_balance', 15, 2)->default(0.00);
             $table->boolean('is_active')->default(true);
             $table->text('notes')->nullable();

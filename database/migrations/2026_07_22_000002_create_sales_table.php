@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('customer_id')->nullable()->constrained('customers')->onDelete('restrict');
             $table->enum('business_type', ['retail', 'wholesale'])->default('retail');
             $table->string('reference_number', 50)->unique();
-            $table->string('invoice_number', 100)->nullable();
+            $table->string('invoice_number', 100)->nullable()->unique();
             $table->string('bill_image', 255)->nullable();
             $table->decimal('total_amount', 15, 2);
             $table->decimal('paid_amount', 15, 2)->default(0.00);

@@ -18,6 +18,7 @@ return new class extends Migration
             $table->decimal('amount', 15, 2);
             $table->date('expense_date');
             $table->string('receipt_image', 255)->nullable();
+            $table->string('bill_image', 255)->nullable();
             $table->text('notes')->nullable();
             $table->foreignId('created_by')->constrained('users')->onDelete('cascade');
             $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
