@@ -196,6 +196,17 @@ class UserController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            // Super Admin user protection: only Super Admin can update
+            if ($user->hasRole('Super Admin')) {
+                $authUser = auth()->user();
+                if (!$authUser || !$authUser->hasRole('Super Admin')) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Cannot update Super Admin user',
+                    ], 422);
+                }
+            }
+
             $data = $request->validated();
 
             // Handle Profile Image Upload & Delete Old Image
@@ -271,6 +282,14 @@ class UserController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            // Super Admin user protection: cannot delete
+            if ($user->hasRole('Super Admin')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Cannot delete Super Admin user',
+                ], 422);
+            }
+
             // Delete profile image if exists
             if (!empty($user->profile_image)) {
                 $this->deleteFile($user->profile_image);
@@ -344,6 +363,14 @@ class UserController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            // Super Admin user protection: cannot toggle status
+            if ($user->hasRole('Super Admin')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Cannot toggle Super Admin status',
+                ], 422);
+            }
+
             $user->is_active = !$user->is_active;
             $user->save();
 
@@ -388,6 +415,14 @@ class UserController extends Controller implements HasMiddleware
                     'status' => 'error',
                     'message' => 'User not found',
                 ], 404);
+            }
+
+            // Super Admin user protection: cannot toggle login
+            if ($user->hasRole('Super Admin')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Cannot toggle Super Admin login access',
+                ], 422);
             }
 
             $user->can_login = !$user->can_login;

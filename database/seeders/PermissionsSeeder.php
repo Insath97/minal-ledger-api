@@ -110,17 +110,12 @@ class PermissionsSeeder extends Seeder
             ]);
         }
 
-        $roles = [
-            'Super Admin',
-        ];
-
-        foreach ($roles as $roleName) {
-            Role::firstOrCreate(['guard_name' => 'api', 'name' => $roleName]);
-        }
-
+        Role::firstOrCreate(['guard_name' => 'api', 'name' => 'Super Admin', 'is_protected' => true]);
+        
         $superAdminRole = Role::where('name', 'Super Admin')->first();
-        $allPermissions = Permission::all();
         if ($superAdminRole) {
+            $superAdminRole->update(['is_protected' => true]);
+            $allPermissions = Permission::all();
             $superAdminRole->syncPermissions($allPermissions);
         }
     }

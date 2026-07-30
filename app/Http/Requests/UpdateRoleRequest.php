@@ -35,7 +35,8 @@ class UpdateRoleRequest extends FormRequest
                 Rule::unique('roles')->ignore($roleId)
             ],
             'permissions' => 'sometimes|array',
-            'permissions.*' => 'exists:permissions,id'
+            'permissions.*' => 'exists:permissions,id',
+            'is_protected' => 'sometimes|boolean',
         ];
     }
 

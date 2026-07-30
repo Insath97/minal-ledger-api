@@ -153,13 +153,23 @@ class RoleController extends Controller implements HasMiddleware
                 ], 404);
             }
 
+            // Super Admin role protection: only Super Admin can update it
+            if ($role->is_protected) {
+                $authUser = auth('api')->user();
+                if (!$authUser || !$authUser->hasRole('Super Admin')) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Cannot update protected system role: ' . $role->name,
+                    ], 422);
+                }
+            }
+
             if (isset($data['name'])) {
                 $role->update(['name' => $data['name']]);
             }
 
-            if (isset($data['is_protected'])) {
-                $role->update(['is_protected' => $data['is_protected']]);
-            }
+            // Never allow changing is_protected via update
+            unset($data['is_protected']);
 
             if (isset($data['permissions'])) {
                 $permissions = Permission::whereIn('id', $data['permissions'])->get();
