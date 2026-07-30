@@ -108,8 +108,17 @@ trait ActivityLogTrait
      */
     protected function resolveAuthenticatedUserId()
     {
-        // Check standard API/JWT/Sanctum or Web guards in order of popularity
-        $guards = ['api', 'sanctum', 'web'];
+        try {
+            // Check the main 'api' guard first directly to avoid looping and resolving other guards
+            if (Auth::guard('api')->check()) {
+                return Auth::guard('api')->id();
+            }
+        } catch (\Throwable $e) {
+            // Silence and continue to fallbacks
+        }
+
+        // Fallback checks for other guards if any
+        $guards = ['sanctum', 'web'];
 
         foreach ($guards as $guard) {
             try {
@@ -117,12 +126,11 @@ trait ActivityLogTrait
                     return Auth::guard($guard)->id();
                 }
             } catch (\Throwable $e) {
-                // Guard not defined or has issues - continue to next guard
                 continue;
             }
         }
 
-        // Final fallback to default auth manager if checks above pass or fail
+        // Final fallback to default auth guard
         try {
             if (Auth::check()) {
                 return Auth::id();

@@ -37,26 +37,39 @@ class DatabaseService
         fwrite($handle, "SET FOREIGN_KEY_CHECKS=0;\n");
         fwrite($handle, "SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\n\n");
 
-        $tables = DB::select("SHOW TABLES");
+        $driverName = DB::connection()->getDriverName();
         $dbName = $databaseName;
 
-        foreach ($tables as $table) {
-            $tableName = $table->{"Tables_in_{$dbName}"} ?? reset($table);
+        if ($driverName === 'sqlite') {
+            $tables = DB::select("SELECT name as table_name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+        } else {
+            $tables = DB::select("SHOW TABLES");
+        }
 
-            $createTable = DB::select("SHOW CREATE TABLE `{$tableName}`");
-            if (!empty($createTable)) {
+        foreach ($tables as $table) {
+            $tableName = $table->table_name ?? ($table->{"Tables_in_{$dbName}"} ?? reset($table));
+
+            if ($driverName === 'sqlite') {
+                $createTable = DB::select("SELECT sql FROM sqlite_schema WHERE type='table' AND name='{$tableName}'");
+                $createSql = $createTable[0]->sql ?? '';
+            } else {
+                $createTable = DB::select("SHOW CREATE TABLE `{$tableName}`");
                 $createSql = $createTable[0]->{'Create Table'} ?? '';
+            }
+
+            if (!empty($createSql)) {
                 fwrite($handle, "-- Table: {$tableName}\n");
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n");
                 fwrite($handle, $createSql . ";\n\n");
             }
 
-            $rows = DB::select("SELECT * FROM `{$tableName}`");
-            if (!empty($rows)) {
-                $columns = array_keys((array) $rows[0]);
+            $firstRow = DB::table($tableName)->first();
+            if ($firstRow) {
+                $columns = array_keys((array) $firstRow);
                 $columnList = implode('`, `', array_map(fn($c) => "`{$c}`", $columns));
 
-                foreach ($rows as $row) {
+                // lazy() queries rows in chunks of 500 without loading the whole table into memory
+                DB::table($tableName)->lazy(500)->each(function ($row) use ($handle, $tableName, $columnList) {
                     $values = array_map(function ($value) {
                         if ($value === null) return 'NULL';
                         return "'" . addslashes($value) . "'";
@@ -64,7 +77,7 @@ class DatabaseService
 
                     $valueList = implode(', ', $values);
                     fwrite($handle, "INSERT INTO `{$tableName}` ({$columnList}) VALUES ({$valueList});\n");
-                }
+                });
                 fwrite($handle, "\n");
             }
         }

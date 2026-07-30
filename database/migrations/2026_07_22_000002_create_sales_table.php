@@ -27,6 +27,11 @@ return new class extends Migration
             $table->foreignId('created_by')->constrained('users')->onDelete('cascade');
             $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
+
+            // Performance indexes
+            $table->index(['payment_status', 'sale_date'], 'sales_status_date_index');
+            $table->index('sale_date', 'sales_date_index');
+            $table->index(['customer_id', 'payment_status', 'sale_date'], 'sales_cust_status_date_index');
         });
     }
 

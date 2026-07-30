@@ -107,14 +107,27 @@ class ReportController extends Controller implements HasMiddleware
 
             $customer = Customer::findOrFail($customerId);
 
+            // Calculate opening balance before date_from if provided
+            $openingBalance = 0.00;
+            if ($dateFrom) {
+                $priorSalesSum = (float) Sale::where('customer_id', $customerId)
+                    ->where('sale_date', '<', $dateFrom)
+                    ->sum('total_amount');
+
+                $priorPaymentsSum = (float) Payment::where('customer_id', $customerId)
+                    ->where('payment_date', '<', $dateFrom)
+                    ->sum('total_amount');
+
+                $openingBalance = $priorSalesSum - $priorPaymentsSum;
+            }
+
             // Sales
-            $salesQuery = Sale::where('customer_id', $customerId)
-                ->orderBy('sale_date', 'desc');
+            $salesQuery = Sale::where('customer_id', $customerId);
             if ($dateFrom) $salesQuery->where('sale_date', '>=', $dateFrom);
             if ($dateTo) $salesQuery->where('sale_date', '<=', $dateTo);
             $sales = $salesQuery->get()->map(fn (Sale $s) => [
                 'type' => 'sale',
-                'date' => $s->sale_date,
+                'date' => $s->sale_date->toDateString(),
                 'reference' => $s->reference_number,
                 'description' => "Sale - {$s->reference_number}",
                 'debit' => (float) $s->total_amount,
@@ -123,13 +136,12 @@ class ReportController extends Controller implements HasMiddleware
             ]);
 
             // Payments
-            $paymentQuery = Payment::where('customer_id', $customerId)
-                ->orderBy('payment_date', 'desc');
+            $paymentQuery = Payment::where('customer_id', $customerId);
             if ($dateFrom) $paymentQuery->where('payment_date', '>=', $dateFrom);
             if ($dateTo) $paymentQuery->where('payment_date', '<=', $dateTo);
             $payments = $paymentQuery->get()->map(fn (Payment $p) => [
                 'type' => 'payment',
-                'date' => $p->payment_date,
+                'date' => $p->payment_date->toDateString(),
                 'reference' => "PAY-{$p->id}",
                 'description' => "Payment ({$p->payment_method})",
                 'debit' => 0.0,
@@ -137,15 +149,19 @@ class ReportController extends Controller implements HasMiddleware
                 'balance' => null,
             ]);
 
-            // Merge and sort by date
-            $transactions = $sales->concat($payments)->sortByDesc('date')->values();
+            // Merge and sort chronologically (ascending) to compute correct running balance
+            $transactions = $sales->concat($payments)->sortBy('date')->values();
 
-            // Running balance
-            $runningBalance = 0.0;
-            foreach ($transactions as &$txn) {
+            // Running balance calculation starting from opening balance
+            $runningBalance = $openingBalance;
+            $transactions = $transactions->map(function ($txn) use (&$runningBalance) {
                 $runningBalance += $txn['debit'] - $txn['credit'];
                 $txn['balance'] = round($runningBalance, 2);
-            }
+                return $txn;
+            });
+
+            // Reverse collection back to descending (newest first) for presentation
+            $transactions = $transactions->reverse()->values();
 
             $totalSales = (float) $sales->sum('debit');
             $totalPayments = (float) $payments->sum('credit');
@@ -162,9 +178,11 @@ class ReportController extends Controller implements HasMiddleware
                         'outstanding_balance' => (float) $customer->outstanding_balance,
                     ],
                     'summary' => [
+                        'opening_balance' => $openingBalance,
                         'total_sales' => $totalSales,
                         'total_payments' => $totalPayments,
                         'net_balance' => $totalSales - $totalPayments,
+                        'closing_balance' => round($openingBalance + $totalSales - $totalPayments, 2),
                     ],
                     'transactions' => $transactions,
                 ],
@@ -442,45 +460,68 @@ class ReportController extends Controller implements HasMiddleware
     public function duesAging(Request $request): JsonResponse
     {
         try {
-            $this->logActivity('REPORT_GENERATE', 'Report', 'Generated Customer Dues Aging Analysis Report');
-            $unpaidSales = Sale::with('customer:id,code,name,phone')
-                ->whereIn('payment_status', ['unpaid', 'partial'])
-                ->where('due_amount', '>', 0)
-                ->get();
+            $todayStr = now()->toDateString();
+            $driver = DB::connection()->getDriverName();
+
+            // 1. Calculate summary aggregates directly in database (extremely fast, constant memory)
+            if ($driver === 'sqlite') {
+                $agingStats = Sale::whereIn('payment_status', ['unpaid', 'partial'])
+                    ->where('due_amount', '>', 0)
+                    ->selectRaw("
+                        SUM(due_amount) as total_due,
+                        SUM(CASE WHEN CAST(julianday(?) - julianday(sale_date) AS INTEGER) <= 30 THEN due_amount ELSE 0 END) as current_0_30,
+                        SUM(CASE WHEN CAST(julianday(?) - julianday(sale_date) AS INTEGER) > 30 AND CAST(julianday(?) - julianday(sale_date) AS INTEGER) <= 60 THEN due_amount ELSE 0 END) as aging_31_60,
+                        SUM(CASE WHEN CAST(julianday(?) - julianday(sale_date) AS INTEGER) > 60 AND CAST(julianday(?) - julianday(sale_date) AS INTEGER) <= 90 THEN due_amount ELSE 0 END) as aging_61_90,
+                        SUM(CASE WHEN CAST(julianday(?) - julianday(sale_date) AS INTEGER) > 90 THEN due_amount ELSE 0 END) as over_90
+                    ", [$todayStr, $todayStr, $todayStr, $todayStr, $todayStr, $todayStr, $todayStr, $todayStr, $todayStr])
+                    ->first();
+            } else {
+                $agingStats = Sale::whereIn('payment_status', ['unpaid', 'partial'])
+                    ->where('due_amount', '>', 0)
+                    ->selectRaw("
+                        SUM(due_amount) as total_due,
+                        SUM(CASE WHEN DATEDIFF(?, sale_date) <= 30 THEN due_amount ELSE 0 END) as current_0_30,
+                        SUM(CASE WHEN DATEDIFF(?, sale_date) > 30 AND DATEDIFF(?, sale_date) <= 60 THEN due_amount ELSE 0 END) as aging_31_60,
+                        SUM(CASE WHEN DATEDIFF(?, sale_date) > 60 AND DATEDIFF(?, sale_date) <= 90 THEN due_amount ELSE 0 END) as aging_61_90,
+                        SUM(CASE WHEN DATEDIFF(?, sale_date) > 90 THEN due_amount ELSE 0 END) as over_90
+                    ", [$todayStr, $todayStr, $todayStr, $todayStr])
+                    ->first();
+            }
 
             $aging = [
-                'current_0_30' => 0.00,
-                'aging_31_60' => 0.00,
-                'aging_61_90' => 0.00,
-                'over_90' => 0.00,
-                'total_due' => 0.00,
+                'current_0_30' => (float) ($agingStats->current_0_30 ?? 0.00),
+                'aging_31_60'  => (float) ($agingStats->aging_31_60 ?? 0.00),
+                'aging_61_90'  => (float) ($agingStats->aging_61_90 ?? 0.00),
+                'over_90'      => (float) ($agingStats->over_90 ?? 0.00),
+                'total_due'    => (float) ($agingStats->total_due ?? 0.00),
             ];
 
-            $detailedSales = [];
+            // 2. Fetch detailed list - selective columns + safety limit to prevent memory exhaustion
+            $sales = Sale::with('customer:id,code,name,phone')
+                ->whereIn('payment_status', ['unpaid', 'partial'])
+                ->where('due_amount', '>', 0)
+                ->select(['id', 'reference_number', 'customer_id', 'sale_date', 'due_amount'])
+                ->orderBy('sale_date', 'asc') // Oldest outstanding first
+                ->limit(1000) // Upper limit to ensure performance safety
+                ->get();
 
-            foreach ($unpaidSales as $sale) {
+            $detailedSales = $sales->map(function (Sale $sale) use ($todayStr) {
                 $saleDate = Carbon::parse($sale->sale_date)->startOfDay();
-                $today = now()->startOfDay();
+                $today = Carbon::parse($todayStr)->startOfDay();
                 $days = $saleDate->greaterThan($today) ? 0 : (int) $saleDate->diffInDays($today);
                 $due = (float) $sale->due_amount;
 
-                $aging['total_due'] += $due;
-
                 if ($days <= 30) {
                     $bucket = '0-30 days';
-                    $aging['current_0_30'] += $due;
                 } elseif ($days <= 60) {
                     $bucket = '31-60 days';
-                    $aging['aging_31_60'] += $due;
                 } elseif ($days <= 90) {
                     $bucket = '61-90 days';
-                    $aging['aging_61_90'] += $due;
                 } else {
                     $bucket = '90+ days';
-                    $aging['over_90'] += $due;
                 }
 
-                $detailedSales[] = [
+                return [
                     'sale_id' => $sale->id,
                     'reference_number' => $sale->reference_number,
                     'customer' => $sale->customer,
@@ -489,7 +530,7 @@ class ReportController extends Controller implements HasMiddleware
                     'due_amount' => $due,
                     'aging_bucket' => $bucket,
                 ];
-            }
+            });
 
             return response()->json([
                 'status' => 'success',

@@ -26,6 +26,10 @@ return new class extends Migration
             $table->foreignId('created_by')->constrained('users')->onDelete('cascade');
             $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
+
+            // Performance indexes
+            $table->index(['status', 'cheque_date'], 'cheques_status_date_index');
+            $table->index('cheque_date', 'cheques_date_index');
         });
     }
 

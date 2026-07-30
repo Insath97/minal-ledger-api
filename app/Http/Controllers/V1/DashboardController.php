@@ -37,31 +37,51 @@ class DashboardController extends Controller implements HasMiddleware
             $prevMonthStart = $now->copy()->subMonth()->startOfMonth()->toDateString();
             $prevMonthEnd = $now->copy()->subMonth()->endOfMonth()->toDateString();
 
-            // --- Total Sales ---
-            $totalSales = (float) Sale::sum('total_amount');
-            $currentMonthSales = (float) Sale::whereBetween('sale_date', [$currentMonthStart, $currentMonthEnd])->sum('total_amount');
-            $prevMonthSales = (float) Sale::whereBetween('sale_date', [$prevMonthStart, $prevMonthEnd])->sum('total_amount');
+            // --- Total Sales (Consolidated Query) ---
+            $salesStats = Sale::selectRaw("
+                SUM(total_amount) as total_sales,
+                SUM(CASE WHEN sale_date BETWEEN ? AND ? THEN total_amount ELSE 0 END) as current_month_sales,
+                SUM(CASE WHEN sale_date BETWEEN ? AND ? THEN total_amount ELSE 0 END) as prev_month_sales
+            ", [$currentMonthStart, $currentMonthEnd, $prevMonthStart, $prevMonthEnd])->first();
+
+            $totalSales = (float) ($salesStats->total_sales ?? 0);
+            $currentMonthSales = (float) ($salesStats->current_month_sales ?? 0);
+            $prevMonthSales = (float) ($salesStats->prev_month_sales ?? 0);
             $salesChange = $prevMonthSales > 0 ? round(($currentMonthSales - $prevMonthSales) / $prevMonthSales * 100, 1) : 0;
 
-            // --- Total Expenses ---
-            $totalExpenses = (float) Expense::sum('amount');
-            $currentMonthExpenses = (float) Expense::whereBetween('expense_date', [$currentMonthStart, $currentMonthEnd])->sum('amount');
-            $prevMonthExpenses = (float) Expense::whereBetween('expense_date', [$prevMonthStart, $prevMonthEnd])->sum('amount');
+            // --- Total Expenses (Consolidated Query) ---
+            $expenseStats = Expense::selectRaw("
+                SUM(amount) as total_expenses,
+                SUM(CASE WHEN expense_date BETWEEN ? AND ? THEN amount ELSE 0 END) as current_month_expenses,
+                SUM(CASE WHEN expense_date BETWEEN ? AND ? THEN amount ELSE 0 END) as prev_month_expenses
+            ", [$currentMonthStart, $currentMonthEnd, $prevMonthStart, $prevMonthEnd])->first();
+
+            $totalExpenses = (float) ($expenseStats->total_expenses ?? 0);
+            $currentMonthExpenses = (float) ($expenseStats->current_month_expenses ?? 0);
+            $prevMonthExpenses = (float) ($expenseStats->prev_month_expenses ?? 0);
             $expensesChange = $prevMonthExpenses > 0 ? round(($currentMonthExpenses - $prevMonthExpenses) / $prevMonthExpenses * 100, 1) : 0;
 
-            // --- Total Received (all income from finance_records: payments + cleared cheques + sale upfronts) ---
-            $totalReceived = (float) FinanceRecord::where('record_type', 'income')->sum('amount');
-            $currentMonthReceived = (float) FinanceRecord::where('record_type', 'income')
-                ->whereBetween('record_date', [$currentMonthStart, $currentMonthEnd])
-                ->sum('amount');
-            $prevMonthReceived = (float) FinanceRecord::where('record_type', 'income')
-                ->whereBetween('record_date', [$prevMonthStart, $prevMonthEnd])
-                ->sum('amount');
+            // --- Total Received (Consolidated Query) ---
+            $receivedStats = FinanceRecord::where('record_type', 'income')->selectRaw("
+                SUM(amount) as total_received,
+                SUM(CASE WHEN record_date BETWEEN ? AND ? THEN amount ELSE 0 END) as current_month_received,
+                SUM(CASE WHEN record_date BETWEEN ? AND ? THEN amount ELSE 0 END) as prev_month_received
+            ", [$currentMonthStart, $currentMonthEnd, $prevMonthStart, $prevMonthEnd])->first();
+
+            $totalReceived = (float) ($receivedStats->total_received ?? 0);
+            $currentMonthReceived = (float) ($receivedStats->current_month_received ?? 0);
+            $prevMonthReceived = (float) ($receivedStats->prev_month_received ?? 0);
             $receivedChange = $prevMonthReceived > 0 ? round(($currentMonthReceived - $prevMonthReceived) / $prevMonthReceived * 100, 1) : 0;
 
             // --- Outstanding Dues ---
             $totalOutstanding = (float) Customer::active()->sum('outstanding_balance');
-            $prevMonthOutstanding = (float) Customer::active()->sum('outstanding_balance');
+            
+            // Calculate previous month's outstanding balance:
+            // Outstanding (End of Prev Month) = Current Outstanding + Payments (Current Month) - Sales Dues (Current Month)
+            $paymentsCurrentMonth = (float) Payment::whereBetween('payment_date', [$currentMonthStart, $currentMonthEnd])->sum('total_amount');
+            $salesDueCurrentMonth = (float) Sale::whereBetween('sale_date', [$currentMonthStart, $currentMonthEnd])->sum('due_amount');
+            $prevMonthOutstanding = max(0.0, $totalOutstanding + $paymentsCurrentMonth - $salesDueCurrentMonth);
+
             $outstandingChange = $prevMonthOutstanding > 0 ? round(($totalOutstanding - $prevMonthOutstanding) / $prevMonthOutstanding * 100, 1) : 0;
 
             return response()->json([

@@ -23,6 +23,10 @@ return new class extends Migration
             $table->foreignId('created_by')->constrained('users')->onDelete('cascade');
             $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
+
+            // Performance indexes
+            $table->index(['payment_method', 'payment_date'], 'payments_method_date_index');
+            $table->index('payment_date', 'payments_date_index');
         });
     }
 
