@@ -114,7 +114,7 @@
         <h1><span class="grad">{{ config('app.name') }}</span><br>REST API</h1>
         <p class="hero-sub">A powerful RESTful API for financial management. Handle sales, payments, expenses, and more with secure JWT authentication.</p>
         <div class="hero-btns">
-            <a href="{{ env('FRONTEND_URL', 'http://localhost:3000') }}" class="btn btn-p" target="_blank">
+            <a href="{{ config('app.frontend_url') }}" class="btn btn-p" target="_blank">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>
                 Open App
             </a>
